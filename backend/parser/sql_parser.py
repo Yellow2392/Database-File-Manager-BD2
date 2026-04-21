@@ -36,10 +36,88 @@ class DBMSSqlParser:
             
         if token.type == 'SELECT':
             return self.parse_select()
-        # elif token.type == 'CREATE': return self.parse_create()
-        # elif token.type == 'INSERT': return self.parse_insert()
+        elif token.type == 'CREATE': 
+            return self.parse_create()
+        elif token.type == 'INSERT': 
+            return self.parse_insert()
+        elif token.type == 'DELETE':
+            return self.parse_delete()
         else:
             raise SyntaxError(f"Sentencia SQL no soportada: {token.value}")
+        
+    """
+    =========================================== CREATE ===========================================
+    """
+    
+    def parse_create(self):
+        # Regla: CREATE TABLE <id> ( <col_def_list> ) [FROM FILE <string>] ;
+        
+        self.match('CREATE')
+        self.match('TABLE')
+        
+        table_name = self.match('ID').value
+        
+        self.match('SYMBOL', '(')
+        
+        # Lista de columnas
+        columns = self.parse_column_list()
+        
+        self.match('SYMBOL', ')')
+        
+        # Bloque FROM FILE opcional
+        file_path = None
+        if self.current_token() and self.current_token().type == 'FROM':
+            self.match('FROM')
+            self.match('FILE')
+            # El lexer ya le quitó las comillas al string
+            file_path = self.match('STRING').value 
+            
+        self.match('SYMBOL', ';')
+        
+        return {
+            "statement": "CREATE",
+            "table": table_name,
+            "columns": columns,
+            "file": file_path
+        }
+
+    def parse_column_list(self):
+        # Regla: <col_def> | <col_def> , <col_def_list>
+        
+        columns = []
+        while True:
+            col_name = self.match('ID').value
+            
+            # Reconocer el tipo de dato
+            type_token = self.current_token()
+            if type_token.type not in ('INT', 'FLOAT', 'VARCHAR', 'POINT'):
+                raise SyntaxError(f"Tipo de dato no válido: {type_token.value}")
+            col_type = self.match(type_token.type).value
+            
+            # Índice (opcional)
+            index_tech = None
+            if self.current_token() and self.current_token().type == 'INDEX':
+                self.match('INDEX')
+                index_tech = self.match('ID').value # Sequential, BTree, Hash
+                
+            columns.append({
+                "name": col_name,
+                "type": col_type,
+                "index": index_tech
+            })
+            
+            # Si hay una coma, hay más columnas. Si no, terminamos el bucle.
+            if self.current_token() and self.current_token().value == ',':
+                self.match('SYMBOL', ',')
+            else:
+                break
+                
+        return columns
+    
+
+    """
+    =========================================== SEARCH ===========================================
+    """
 
     def parse_select(self):
         # Regla: SELECT * FROM <id> WHERE <id> <condicion> ;
@@ -138,3 +216,80 @@ class DBMSSqlParser:
                 
         else:
             raise SyntaxError(f"Condición no reconocida. Token actual: {token.value}")
+        
+    """
+    =========================================== INSERT ===========================================
+    """
+    
+    def parse_insert(self): 
+        # Regla: INSERT INTO <id> VALUES ( <value_list> ) ;
+         
+        self.match('INSERT')
+        self.match('INTO')
+        
+        table_name = self.match('ID').value
+        
+        self.match('VALUES')
+        self.match('SYMBOL', '(')
+        
+        values = []
+        # Procesar lista de valores separados por coma
+        while True:
+            token = self.current_token()
+            
+            if token and token.type in ('NUMBER', 'STRING'):
+                val = self.match(token.type).value
+                values.append(val)
+            else:
+                raise SyntaxError(f"Se esperaba un número o cadena en VALUES. Encontrado: {token.value if token else 'EOF'}")
+            
+            if self.current_token() and self.current_token().value == ',':
+                self.match('SYMBOL', ',')
+            else:
+                break  # Termina si no hay coma
+                
+        self.match('SYMBOL', ')')
+        self.match('SYMBOL', ';')
+        
+        return {
+            "statement": "INSERT",
+            "table": table_name,
+            "values": values,
+            "action": "add" 
+        }
+    
+    """
+    =========================================== DELETE ===========================================
+    """
+
+    def parse_delete(self):   
+        # Regla: DELETE FROM <id> WHERE <id> = <value> ;
+         
+        self.match('DELETE')
+        self.match('FROM')
+        
+        table_name = self.match('ID').value
+        
+        self.match('WHERE')
+        column_name = self.match('ID').value
+        
+        self.match('OP', '=')
+        
+        # Extrae el valor a eliminar
+        token = self.current_token()
+        if token and token.type in ('NUMBER', 'STRING'):
+            val = self.match(token.type).value
+        else:
+             raise SyntaxError(f"Se esperaba un número o cadena después de '='. Encontrado: {token.value if token else 'EOF'}")
+             
+        self.match('SYMBOL', ';')
+        
+        return {
+            "statement": "DELETE",
+            "table": table_name,
+            "condition": {
+                "action": "remove", 
+                "column": column_name,
+                "key": val
+            }
+        }
