@@ -1,40 +1,193 @@
-from backend.catalog import TableMetadata
-from backend.storage import StorageManager
 import os
+import json
+
+from backend.catalog import TableMetadata
+from backend.indexes.sequential import SequentialFile
+from backend.indexes.heap import HeapFile
 
 class Executor:
-    def __init__(self):
-        self.storage_mgr = StorageManager()
-        self.catalog = {}  # Memoria temporal de las tablas que existen
+    def __init__(self, data_dir="backend/data"):
+        self.catalog = {}  # registro de las tablas creadas
+        self.data_dir = data_dir
+
+        self.catalog_file = os.path.join(self.data_dir, "system_catalog.json")
+
+        if not os.path.exists(self.data_dir):
+            os.makedirs(self.data_dir)
+
+        self._load_system_catalog()
+
+    def _save_system_catalog(self): #Persiste el estado de todas las tablas en un archivo JSON
+        data_to_save = {name: meta.to_dict() for name, meta in self.catalog.items()}
+        with open(self.catalog_file, 'w') as f:
+            json.dump(data_to_save, f, indent=4)
+
+    def _load_system_catalog(self): # Lee el archivo JSON y reconstruye los objetos en memoria
+        if os.path.exists(self.catalog_file):
+            with open(self.catalog_file, 'r') as f:
+                raw_data = json.load(f)
+                for name, table_data in raw_data.items():
+                    meta = TableMetadata.from_dict(table_data)
+                    
+                    # Re-instancia el índice físico
+                    meta.primary_index = self._get_index_instance(
+                        meta.index_tech, meta, meta.key_column
+                    )
+                    
+                    self.catalog[name] = meta
+            print(f"[SYSTEM] Catálogo cargado: {list(self.catalog.keys())}")
 
     def execute(self, ast):
+        if not ast:
+            return
+        
         if ast['statement'] == 'CREATE':
             self.execute_create(ast)
-        # elif ast['statement'] == 'SELECT':
-        # elif ast['statement'] == 'INSERT':
-        # elif ast['statement'] == 'DELETE':
+        elif ast['statement'] == 'SELECT':
+            self.execute_select(ast)
+        elif ast['statement'] == 'INSERT':
+            self.execute_insert(ast)
+        elif ast['statement'] == 'DELETE':
+            self.execute_delete(ast)
+    
+    def _get_index_instance(self, tech_name, meta, key_column):
+        tech = tech_name.upper() if tech_name else 'NONE'
+        
+        if tech == 'SEQUENTIAL':
+            return SequentialFile(meta, key_column, self.data_dir)
+        #TODO: elif tech == 'HASH':
+        #TODO: elif tech == 'BTREE':
+        elif tech == 'NONE':
+            return HeapFile(meta, key_column, self.data_dir)
+        else:
+            raise ValueError(f"Técnica no soportada: {tech}")
 
     def execute_create(self, ast):
         table_name = ast['table']
-        columns = ast['columns']
-        file_path = ast['file']
+
+        key_column = None
+        tech_name = None
+        for col in ast['columns']:
+            if col.get('index'):
+                key_column = col['name']
+                tech_name = col['index']
+                break
         
-        print(f"--> Ejecutando CREATE TABLE {table_name}...")
-        
-        # Registro de metadata
-        meta = TableMetadata(table_name, columns)
+        if not key_column:
+            key_column = ast['columns'][0]['name']
+
+        meta = TableMetadata(table_name, ast['columns'], key_column=key_column, index_tech=tech_name)
+
+        # Instancia el gestor físico y lo guarda en el catálogo
+        primary_index = self._get_index_instance(tech_name, meta, key_column)
+        meta.primary_index = primary_index
         self.catalog[table_name] = meta
         
-        print(f"Tamaño de registro: {meta.record_size} bytes")
-        print(f"Factor de Bloque (Registros por página): {meta.block_factor}")
+        print(f"[OK] Tabla {table_name} creada con índice {primary_index.__class__.__name__}.")
         
-        # Ejecutar bulk_load si hay FROM FILE
+        file_path = ast.get('file')
         if file_path:
-            # Asumiendo que el parser trajo el nombre puro, ej "data.csv"
             full_path = os.path.join("dataset", file_path)
-            
             if os.path.exists(full_path):
-                print(f"Iniciando carga masiva desde {full_path}...")
-                self.storage_mgr.bulk_load_csv(meta, full_path)
+                print(f"Delegando carga masiva a {primary_index.__class__.__name__}...")
+                
+                primary_index.bulk_load(full_path)
+                
+                print(f"[OK] Carga masiva completada.")
+
+                self._save_system_catalog()
             else:
-                print(f"ERROR: No se encontró el archivo {full_path}")
+                print(f"[ERROR] Archivo {full_path} no encontrado.")
+
+    def execute_insert(self, ast):
+        table_name = ast['table']
+        if table_name not in self.catalog:
+            print(f"[ERROR] La tabla {table_name} no existe.")
+            return
+         
+        meta = self.catalog[table_name]
+        raw_values = ast['values']
+        parsed_values = []
+        
+        for i, col in enumerate(meta.columns):
+            val = raw_values[i]
+            tipo = col['type'].upper()
+            
+            if tipo == 'VARCHAR':
+                parsed_values.append(str(val).encode('utf-8'))
+            elif tipo == 'INT':
+                parsed_values.append(int(val))
+            elif tipo == 'FLOAT':
+                parsed_values.append(float(val))
+            else:
+                parsed_values.append(val)
+        
+        record_tuple = tuple(parsed_values) + (False,)
+        
+        index = meta.primary_index
+        index.disk_reads, index.disk_writes = 0, 0 
+        
+        index.add(record_tuple)
+        
+        print(f"[OK] Registro insertado exitosamente.")
+        print(f"-> Accesos a disco: {index.disk_reads} reads, {index.disk_writes} writes.")
+
+    def execute_delete(self, ast):
+        table_name = ast['table']
+        if table_name not in self.catalog: return
+        
+        key_to_delete = ast['condition']['key']
+        index = self.catalog[table_name].primary_index
+        
+        index.disk_reads, index.disk_writes = 0, 0 
+        
+        success = index.remove(key_to_delete)
+        if success:
+            print(f"[OK] Registro eliminado. Reads: {index.disk_reads}, Writes: {index.disk_writes}")
+        else:
+            print(f"[INFO] Registro con llave {key_to_delete} no encontrado.")
+
+    def execute_select(self, ast):
+        table_name = ast['table']
+        if table_name not in self.catalog: return
+
+        cond = ast['condition']
+        index = self.catalog[table_name].primary_index
+        index.disk_reads = 0 
+        meta = self.catalog[table_name]
+        
+        if cond['action'] == 'search':
+            raw_result = index.search(cond['key'])
+            print(f"\nResultado de la búsqueda:")
+            
+            if raw_result:
+                clean_result = meta.clean_tuple(raw_result)
+                print(clean_result)
+            else:
+                print("No encontrado.")
+                
+            print(f"-> Accesos a disco de lectura: {index.disk_reads}")
+            
+        elif cond['action'] == 'rangeSearch':
+            raw_results = index.rangeSearch(cond['begin_key'], cond['end_key'])
+            print(f"\nResultados por rango ({len(raw_results)} filas):")
+            
+            for r in raw_results:
+                print(meta.clean_tuple(r))
+                
+            print(f"-> Accesos a disco de lectura: {index.disk_reads}")
+
+    # Auxiliares
+
+    def _parse_csv_row(self, row, columns): # Convierte los strings del CSV a tipos reales de Python antes de pasarlos al index
+        parsed = []
+        for i, col in enumerate(columns):
+            val = row[i].strip()
+            tipo = col['type'].upper()
+            if tipo == 'INT': parsed.append(int(val))
+            elif tipo == 'FLOAT': parsed.append(float(val))
+            elif tipo == 'VARCHAR': parsed.append(val.encode('utf-8'))
+        
+        # is_deleted (False) de Sequential
+        parsed.append(False) 
+        return tuple(parsed)
