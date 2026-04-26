@@ -50,14 +50,12 @@ class Executor:
             self.execute_delete(ast)
     
     def _get_index_instance(self, tech_name, meta, key_column):
-        tech = tech_name.upper() if tech_name else 'NONE'
+        tech = tech_name.upper() if tech_name else 'SEQUENTIAL'
         
         if tech == 'SEQUENTIAL':
             return SequentialFile(meta, key_column, self.data_dir)
         #TODO: elif tech == 'HASH':
         #TODO: elif tech == 'BTREE':
-        elif tech == 'NONE':
-            return SequentialFile(meta, key_column, self.data_dir)
         else:
             raise ValueError(f"Técnica no soportada: {tech}")
 
@@ -72,7 +70,7 @@ class Executor:
                 tech_name = col['index']
                 break
         
-        if not key_column:
+        if not key_column: # Asume que la primera columna es el índice
             key_column = ast['columns'][0]['name']
 
         meta = TableMetadata(table_name, ast['columns'], key_column=key_column, index_tech=tech_name)
