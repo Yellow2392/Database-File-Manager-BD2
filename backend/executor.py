@@ -3,7 +3,6 @@ import json
 
 from backend.catalog import TableMetadata
 from backend.indexes.sequential import SequentialFile
-from backend.indexes.heap import HeapFile
 
 class Executor:
     def __init__(self, data_dir="backend/data"):
@@ -58,7 +57,7 @@ class Executor:
         #TODO: elif tech == 'HASH':
         #TODO: elif tech == 'BTREE':
         elif tech == 'NONE':
-            return HeapFile(meta, key_column, self.data_dir)
+            return SequentialFile(meta, key_column, self.data_dir)
         else:
             raise ValueError(f"Técnica no soportada: {tech}")
 
