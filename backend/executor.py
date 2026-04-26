@@ -3,6 +3,7 @@ import json
 
 from backend.catalog import TableMetadata
 from backend.indexes.sequential import SequentialFile
+from backend.indexes.rtree import RTreeIndex
 
 class Executor:
     def __init__(self, data_dir="backend/data"):
@@ -56,6 +57,8 @@ class Executor:
             return SequentialFile(meta, key_column, self.data_dir)
         #TODO: elif tech == 'HASH':
         #TODO: elif tech == 'BTREE':
+        if tech == 'RTREE':
+            return RTreeIndex(meta, key_column, self.data_dir)
         else:
             raise ValueError(f"Técnica no soportada: {tech}")
 
@@ -173,6 +176,38 @@ class Executor:
             
             for r in raw_results:
                 print(meta.clean_tuple(r))
+                
+            print(f"-> Accesos a disco de lectura: {index.disk_reads}")
+        
+        elif cond['action'] == 'range_spatial':
+            point = cond['point']
+            radius = cond['param']
+            
+            print(f"\nEjecutando Búsqueda por Radio ({radius} unidades) alrededor de {point}...")
+            
+            raw_results = index.rangeSearch(point, radius)
+            
+            if raw_results:
+                for r in raw_results:
+                    print(meta.clean_tuple(r))
+            else:
+                print("No se encontraron resultados en ese radio.")
+                
+            print(f"-> Accesos a disco de lectura R-Tree y Secuencial: {index.disk_reads + index.data_storage.disk_reads}")
+
+        elif cond['action'] == 'knn':
+            point = cond['point']
+            k = cond['param']
+            
+            print(f"\nEjecutando KNN ({k} vecinos) alrededor de {point}...")
+            
+            raw_results = index.knn_search(point, k)
+            
+            if raw_results:
+                for r in raw_results:
+                    print(meta.clean_tuple(r))
+            else:
+                print("No se encontraron resultados en esa área.")
                 
             print(f"-> Accesos a disco de lectura: {index.disk_reads}")
 

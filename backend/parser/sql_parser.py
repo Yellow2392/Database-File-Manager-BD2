@@ -136,6 +136,51 @@ class DBMSSqlParser:
         
         self.match('WHERE')
         column_name = self.match('ID').value
+
+        op_token = self.current_token()
+        
+        # Manejo para la consulta espacial
+        if op_token and op_token.type == 'IN':
+            self.match('IN')
+            self.match('SYMBOL', '(')
+            self.match('POINT')
+            self.match('SYMBOL', '(')
+            
+            # Coordenada X
+            x_val = self.match('NUMBER').value
+            self.match('SYMBOL', ',')
+            # Coordenada Y
+            y_val = self.match('NUMBER').value
+            
+            self.match('SYMBOL', ')')
+            self.match('SYMBOL', ',')
+            
+            tipo_busqueda = self.current_token().type
+            
+            if tipo_busqueda == 'K': # Búsqueda KNN
+                self.match('K')
+                param_val = int(self.match('NUMBER').value)
+                action = 'knn'
+            elif tipo_busqueda == 'RADIUS': # Búsqueda rangeSearch
+                self.match('RADIUS')
+                param_val = float(self.match('NUMBER').value)
+                action = 'range_spatial'
+            else:
+                raise SyntaxError("Se esperaba K o RADIUS en la consulta espacial.")
+                
+            self.match('SYMBOL', ')')
+            self.match('SYMBOL', ';')
+            
+            return {
+                "statement": "SELECT",
+                "table": table_name,
+                "condition": {
+                    "action": action,
+                    "column": column_name,
+                    "point": (x_val, y_val),
+                    "param": param_val 
+                }
+            }
         
         # Análisis de condición a otra regla
         condition_ast = self.parse_condition(column_name)

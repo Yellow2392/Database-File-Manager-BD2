@@ -392,19 +392,30 @@ class SequentialFile(BaseIndex):
     def _parse_row(self, row, columns):
         # Convierte los strings del CSV a int, float o bytes según la metadata
         parsed = []
-        for i, col in enumerate(columns):
-            val = row[i].strip()
+        csv_index = 0
+        
+        for col in self.table_meta.columns:
             tipo = col['type'].upper()
             
-            if tipo == 'INT':
-                parsed.append(int(val))
-            elif tipo == 'FLOAT':
-                parsed.append(float(val))
-            elif tipo == 'VARCHAR':
-                encoded = val.encode('utf-8')
-                parsed.append(encoded)
-            elif tipo == 'POINT':
-                # TODO: Verificar este caso
-                pass 
+            if tipo == 'POINT':
+                #! Consumimos dos columnas consecutivas del archivo csv
+                x_val = float(row[csv_index].strip())
+                y_val = float(row[csv_index + 1].strip())
+                
+                #Agrega de forma plana para que struct.pack('ff') funcione
+                parsed.append(x_val)
+                parsed.append(y_val)
+                csv_index += 2
+            else:
+                # Consumo normal de una sola columna CSV
+                val = row[csv_index].strip()
+                if tipo == 'INT': parsed.append(int(val))
+                elif tipo == 'FLOAT': parsed.append(float(val))
+                elif tipo == 'VARCHAR': parsed.append(val.encode('utf-8'))
+                csv_index += 1
+
         parsed.append(False)
         return parsed
+    
+    def knn_search(self, point, k):
+        return NotImplementedError("KNN no soportado en Sequential")

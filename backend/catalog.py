@@ -38,16 +38,29 @@ class TableMetadata:
             return None
             
         cleaned = []
-        for i, col in enumerate(self.columns):
-            val = raw_tuple[i]
+        raw_idx = 0 
+        
+        for col in self.columns:
             tipo = col['type'].upper()
             
-            if tipo == 'VARCHAR':
-                cleaned.append(val.decode('utf-8').rstrip('\x00'))
-            elif tipo == 'FLOAT':
-                cleaned.append(round(val, 2))
+            if tipo == 'POINT':
+                x_val = raw_tuple[raw_idx]
+                y_val = raw_tuple[raw_idx + 1]
+                
+                cleaned.append((round(x_val, 6), round(y_val, 6)))
+                
+                raw_idx += 2
             else:
-                cleaned.append(val)
+                val = raw_tuple[raw_idx]
+                
+                if tipo == 'VARCHAR':
+                    cleaned.append(val.decode('utf-8').rstrip('\x00'))
+                elif tipo == 'FLOAT':
+                    cleaned.append(round(val, 2))
+                else:
+                    cleaned.append(val)
+                    
+                raw_idx += 1
                 
         return tuple(cleaned)
 

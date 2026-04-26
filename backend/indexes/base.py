@@ -60,3 +60,14 @@ class BaseIndex(ABC):
         Cada técnica implementará esto de la forma más óptima posible.
         """
         pass
+
+    @abstractmethod
+    def knn_search(self, point, k):
+        """
+        Búsqueda de los K vecinos más cercanos (K-Nearest Neighbors).
+        Exclusivo para índices espaciales como el R-Tree.
+        :param point: Tupla (x, y) con las coordenadas de búsqueda.
+        :param k: Cantidad entera de vecinos a retornar.
+        :return: Lista de tuplas encontradas.
+        """
+        pass
