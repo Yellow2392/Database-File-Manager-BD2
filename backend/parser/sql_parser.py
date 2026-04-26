@@ -66,11 +66,17 @@ class DBMSSqlParser:
         
         # Bloque FROM FILE opcional
         file_path = None
+        delimiter_char = ','
+
         if self.current_token() and self.current_token().type == 'FROM':
             self.match('FROM')
             self.match('FILE')
             # El lexer ya le quitó las comillas al string
             file_path = self.match('STRING').value 
+
+            if self.current_token() and self.current_token().type == 'DELIMITER':
+                self.match('DELIMITER')
+                delimiter_char = self.match('STRING').value
             
         self.match('SYMBOL', ';')
         
@@ -78,7 +84,8 @@ class DBMSSqlParser:
             "statement": "CREATE",
             "table": table_name,
             "columns": columns,
-            "file": file_path
+            "file": file_path,
+            "delimiter": delimiter_char
         }
 
     def parse_column_list(self):

@@ -374,9 +374,9 @@ class SequentialFile(BaseIndex):
 
         self.total_main_records = self._count_main_records()
     
-    def bulk_load(self, csv_path): # Implementación de carga masiva
+    def bulk_load(self, csv_path, delimiter = ','): # Implementación de carga masiva
         with open(csv_path, 'r', encoding='utf-8') as f:
-            reader = csv.reader(f, delimiter=';') 
+            reader = csv.reader(f, delimiter=delimiter) 
             next(reader, None)
             
             for row in reader:

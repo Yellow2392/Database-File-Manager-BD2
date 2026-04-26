@@ -14,7 +14,8 @@ class DBMSSqlLexer:
             'CREATE', 'TABLE', 'FROM', 'FILE', 'INDEX',
             'SELECT', 'WHERE', 'BETWEEN', 'AND', 'IN',
             'POINT', 'RADIUS', 'K', 'INSERT', 'INTO',
-            'VALUES', 'DELETE', 'INT', 'FLOAT', 'VARCHAR'
+            'VALUES', 'DELETE', 'INT', 'FLOAT', 'VARCHAR',
+            'DELIMITER'
         }
         
         # Automata finito

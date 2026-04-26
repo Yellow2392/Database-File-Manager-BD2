@@ -54,7 +54,7 @@ class BaseIndex(ABC):
         pass
 
     @abstractmethod
-    def bulk_load(self, csv_path):
+    def bulk_load(self, csv_path, delimiter = ','):
         """
         Realiza la carga masiva de datos desde un archivo CSV.
         Cada técnica implementará esto de la forma más óptima posible.

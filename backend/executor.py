@@ -85,12 +85,14 @@ class Executor:
         print(f"[OK] Tabla {table_name} creada con índice {primary_index.__class__.__name__}.")
         
         file_path = ast.get('file')
+        delimiter_char = ast.get('delimiter', ',')
+
         if file_path:
             full_path = os.path.join("dataset", file_path)
             if os.path.exists(full_path):
                 print(f"Delegando carga masiva a {primary_index.__class__.__name__}...")
                 
-                primary_index.bulk_load(full_path)
+                primary_index.bulk_load(full_path, delimiter = delimiter_char)
                 
                 print(f"[OK] Carga masiva completada.")
 
