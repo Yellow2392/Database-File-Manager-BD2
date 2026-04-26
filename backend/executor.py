@@ -208,8 +208,9 @@ class Executor:
                     print(meta.clean_tuple(r))
             else:
                 print("No se encontraron resultados en esa área.")
-                
-            print(f"-> Accesos a disco de lectura: {index.disk_reads}")
+            
+            total_reads = index.disk_reads + index.data_storage.disk_reads
+            print(f"-> Accesos a disco de lectura: {total_reads}")
 
     # Auxiliares
 
