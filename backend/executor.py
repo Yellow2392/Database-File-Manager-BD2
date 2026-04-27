@@ -1,4 +1,5 @@
 import os
+import glob
 import json
 
 from backend.catalog import TableMetadata
@@ -51,6 +52,8 @@ class Executor:
             self.execute_insert(ast)
         elif ast['statement'] == 'DELETE':
             self.execute_delete(ast)
+        elif ast['statement'] == 'DROP':
+            self.execute_drop(ast)
     
     def _get_index_instance(self, tech_name, meta, key_column):
         tech = tech_name.upper() if tech_name else 'SEQUENTIAL'
@@ -238,3 +241,28 @@ class Executor:
         # is_deleted (False) de Sequential
         parsed.append(False) 
         return tuple(parsed)
+    
+    def execute_drop(self, ast):
+        table_name = ast['table']
+        
+        if table_name not in self.catalog:
+            print(f"[ERROR] La tabla '{table_name}' no existe en el catálogo.")
+            return
+            
+        print(f"Eliminando tabla '{table_name}' y sus archivos físicos...")
+        
+        pattern = os.path.join(self.data_dir, f"{table_name}_*.dat")
+        files_to_delete = glob.glob(pattern)
+        
+        for file_path in files_to_delete:
+            try:
+                os.remove(file_path)
+                print(f" -> Archivo borrado: {os.path.basename(file_path)}")
+            except Exception as e:
+                print(f" -> [Advertencia] No se pudo borrar {file_path}: {e}")
+                
+        del self.catalog[table_name]
+        
+        self._save_system_catalog()
+        
+        print(f"[OK] Tabla '{table_name}' eliminada completamente del sistema.")

@@ -42,6 +42,8 @@ class DBMSSqlParser:
             return self.parse_insert()
         elif token.type == 'DELETE':
             return self.parse_delete()
+        elif token.type == 'DROP':
+            return self.parse_drop()
         else:
             raise SyntaxError(f"Sentencia SQL no soportada: {token.value}")
         
@@ -344,4 +346,19 @@ class DBMSSqlParser:
                 "column": column_name,
                 "key": val
             }
+        }
+    
+    """
+    =========================================== DROP ===========================================
+    """
+
+    def parse_drop(self):
+        self.match('DROP')
+        self.match('TABLE')
+        table_name = self.match('ID').value
+        self.match('SYMBOL', ';')
+        
+        return {
+            "statement": "DROP",
+            "table": table_name
         }
