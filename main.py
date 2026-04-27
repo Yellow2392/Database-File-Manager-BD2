@@ -29,7 +29,7 @@ if __name__ == '__main__':
     consulta = "SELECT * FROM Viajes WHERE Pickup_Location IN (POINT(-73.9903, 40.7346), RADIUS 0.001);"
     #consulta = 'CREATE TABLE Empleados (Employee_ID INT INDEX Sequential, Employee_Name VARCHAR, Age INT, Country VARCHAR, Department VARCHAR, Position VARCHAR, Salary FLOAT, Joining_Date VARCHAR) FROM FILE "employee.csv" DELIMITER ";";'
     #consulta = 'SELECT * FROM Empleados WHERE Employee_ID = 17648;'
-    #consulta = 'SELECT * FROM Empleados WHERE Employee_ID BETWEEN 1000 AND 1200;'
+    consulta = 'SELECT * FROM Empleados WHERE Employee_ID BETWEEN 50 AND 60;'
 
     # Parseo
     lexer = DBMSSqlLexer()

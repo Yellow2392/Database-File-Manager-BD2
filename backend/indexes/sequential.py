@@ -264,15 +264,82 @@ class SequentialFile(BaseIndex):
         return False
     
     def rangeSearch(self, begin_key, end_key):
-        # Escanea secuencialmente las páginas buscando llaves en el rango.
         resultados = []
         
-        for filename in [self.main_file, self.aux_file]:
-            tamano = os.path.getsize(filename)
-            if tamano == 0: continue
+        # Búsqueda en Main File
+        tamano_main = os.path.getsize(self.main_file)
+        if tamano_main > 0:
+            total_pages = tamano_main // self.PAGE_SIZE
+            start_page = 0
             
-            with open(filename, 'rb') as f:
-                for i in range(tamano // self.PAGE_SIZE):
+            # Por búsqueda binaria
+            low = 0
+            high = total_pages - 1
+            
+            while low <= high:
+                mid = (low + high) // 2
+                with open(self.main_file, 'rb') as f:
+                    f.seek(mid * self.PAGE_SIZE)
+                    page_data = f.read(self.PAGE_SIZE)
+                    self.disk_reads += 1
+                    
+                    num_records = struct.unpack('i 12x', page_data[:16])[0]
+                    if num_records == 0: break
+                    
+                    offset_first = 16
+                    first_record = struct.unpack(self.table_meta.struct_format, page_data[offset_first : offset_first + self.table_meta.record_size])
+                    first_key = first_record[0]
+                    
+                    offset_last = 16 + ((num_records - 1) * self.table_meta.record_size)
+                    last_record = struct.unpack(self.table_meta.struct_format, page_data[offset_last : offset_last + self.table_meta.record_size])
+                    last_key = last_record[0]
+                    
+                    if last_key < begin_key:
+                        low = mid + 1
+                    elif first_key > begin_key:
+                        high = mid - 1
+                    else:
+                        # El begin_key debería estar dentro de esta página
+                        start_page = mid
+                        break
+            else: # Si no hubo coincidencia exacta, low apunta a la página más cercana
+                start_page = min(low, total_pages - 1)
+
+            # Escaneo Secuencial sobre la página
+            with open(self.main_file, 'rb') as f:
+                terminar_busqueda = False
+                
+                for i in range(start_page, total_pages):
+                    if terminar_busqueda: break 
+                    
+                    f.seek(i * self.PAGE_SIZE)
+                    page_data = f.read(self.PAGE_SIZE)
+                    self.disk_reads += 1 
+                    
+                    num_records = struct.unpack('i 12x', page_data[:16])[0]
+                    
+                    for j in range(num_records):
+                        offset = 16 + (j * self.table_meta.record_size)
+                        record_bytes = page_data[offset : offset + self.table_meta.record_size]
+                        record_tuple = struct.unpack(self.table_meta.struct_format, record_bytes)
+                        
+                        key = record_tuple[0]
+                        is_deleted = record_tuple[-1]
+                        
+                        if key > end_key:
+                            terminar_busqueda = True
+                            break 
+                            
+                        if not is_deleted and begin_key <= key <= end_key:
+                            resultados.append(record_tuple)
+
+
+        # Aux File
+        tamano_aux = os.path.getsize(self.aux_file)
+        if tamano_aux > 0:
+            with open(self.aux_file, 'rb') as f:
+                for i in range(tamano_aux // self.PAGE_SIZE):
+                    f.seek(i * self.PAGE_SIZE)
                     page_data = f.read(self.PAGE_SIZE)
                     self.disk_reads += 1
                     
@@ -288,7 +355,8 @@ class SequentialFile(BaseIndex):
                         
                         if not is_deleted and begin_key <= key <= end_key:
                             resultados.append(record_tuple)
-        
+
+        # Ordenamos porque los datos del aux_file pueden estar intercalados lógicamente
         resultados.sort(key=lambda x: x[0])
         return resultados
     
