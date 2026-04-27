@@ -5,6 +5,8 @@ from backend.catalog import TableMetadata
 from backend.indexes.sequential import SequentialFile
 from backend.indexes.rtree import RTreeIndex
 
+from .visualizer import save_spatial_plot
+
 class Executor:
     def __init__(self, data_dir="backend/data"):
         self.catalog = {}  # registro de las tablas creadas
@@ -179,38 +181,48 @@ class Executor:
                 
             print(f"-> Accesos a disco de lectura: {index.disk_reads}")
         
-        elif cond['action'] == 'range_spatial':
+        elif cond['action'] in ['knn', 'range_spatial']:
             point = cond['point']
-            radius = cond['param']
+            param = cond['param']
+            is_knn = (cond['action'] == 'knn')
             
-            print(f"\nEjecutando Búsqueda por Radio ({radius} unidades) alrededor de {point}...")
+            tipo_txt = f"KNN ({param} vecinos)" if is_knn else f"Radio ({param} unidades)"
+            print(f"\nEjecutando Búsqueda por {tipo_txt} alrededor de {point}...")
             
-            raw_results = index.rangeSearch(point, radius)
-            
-            if raw_results:
-                for r in raw_results:
-                    print(meta.clean_tuple(r))
+            if is_knn:
+                raw_results = index.knn_search(point, param)
             else:
-                print("No se encontraron resultados en ese radio.")
-                
-            print(f"-> Accesos a disco de lectura R-Tree y Secuencial: {index.disk_reads + index.data_storage.disk_reads}")
-
-        elif cond['action'] == 'knn':
-            point = cond['point']
-            k = cond['param']
-            
-            print(f"\nEjecutando KNN ({k} vecinos) alrededor de {point}...")
-            
-            raw_results = index.knn_search(point, k)
-            
-            if raw_results:
-                for r in raw_results:
-                    print(meta.clean_tuple(r))
-            else:
-                print("No se encontraron resultados en esa área.")
+                raw_results = index.rangeSearch(point, param)
             
             total_reads = index.disk_reads + index.data_storage.disk_reads
-            print(f"-> Accesos a disco de lectura: {total_reads}")
+            
+            if raw_results:
+                clean_results_list = []
+                for r in raw_results:
+                    clean = meta.clean_tuple(r)
+                    clean_results_list.append(clean)
+                    print(clean)
+                    
+                # Generacion de imagen
+                spatial_col_idx = 0
+                for i, col in enumerate(meta.columns):
+                    if col['name'] == index.key_column:
+                        spatial_col_idx = i
+                        break
+                        
+                img_path = save_spatial_plot(
+                    target_point=point, 
+                    clean_results=clean_results_list, 
+                    spatial_col_idx=spatial_col_idx, 
+                    search_type="KNN" if is_knn else "RANGE", 
+                    param=param,
+                    data_dir=self.data_dir
+                )
+                print(f"-> Gráfico guardado en: {img_path}")
+            else:
+                print("No se encontraron resultados en esa área.")
+                
+            print(f"-> Accesos a disco de lectura R-Tree y Secuencial: {total_reads}")
 
     # Auxiliares
 

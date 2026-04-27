@@ -6,6 +6,7 @@ from backend.executor import Executor
 if __name__ == '__main__':
     consulta = """
         CREATE TABLE Viajes (
+        ID INT,
         VendorID INT,
         Pickup_Time VARCHAR,
         Dropoff_Time VARCHAR,
@@ -25,7 +26,7 @@ if __name__ == '__main__':
         Total_Amount FLOAT
     ) FROM FILE "yellow_tripdata_2016-01_10k.csv";
     """
-    consulta = "SELECT * FROM Viajes WHERE Pickup_Location IN (POINT(-73.9903, 40.7346), K 5);"
+    consulta = "SELECT * FROM Viajes WHERE Pickup_Location IN (POINT(-73.9903, 40.7346), RADIUS 0.001);"
     #consulta = 'CREATE TABLE Empleados (Employee_ID INT INDEX Sequential, Employee_Name VARCHAR, Age INT, Country VARCHAR, Department VARCHAR, Position VARCHAR, Salary FLOAT, Joining_Date VARCHAR) FROM FILE "employee.csv" DELIMITER ";";'
     #consulta = 'SELECT * FROM Empleados WHERE Employee_ID = 17648;'
     #consulta = 'SELECT * FROM Empleados WHERE Employee_ID BETWEEN 1000 AND 1200;'
