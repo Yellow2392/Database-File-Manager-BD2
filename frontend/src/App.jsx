@@ -54,6 +54,60 @@ function App() {
   const [hoveredCoords, setHoveredCoords] = useState(null)
   const plotContainerRef = useRef(null)
 
+  // Estados para tamaños redimensionables
+  const [leftWidth, setLeftWidth] = useState(() => {
+    return parseInt(localStorage.getItem('leftWidth')) || 250
+  })
+  const [rightWidth, setRightWidth] = useState(() => {
+    return parseInt(localStorage.getItem('rightWidth')) || 700
+  })
+
+  const handleMouseDownLeft = (e) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startWidth = leftWidth
+
+    const handleMouseMove = (moveEvent) => {
+      const diff = moveEvent.clientX - startX
+      const newWidth = Math.max(150, Math.min(startWidth + diff, 600))
+      setLeftWidth(newWidth)
+      localStorage.setItem('leftWidth', newWidth.toString())
+    }
+
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+      document.body.style.userSelect = 'auto'
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+    document.body.style.userSelect = 'none'
+  }
+
+  const handleMouseDownRight = (e) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startWidth = rightWidth
+
+    const handleMouseMove = (moveEvent) => {
+      const diff = startX - moveEvent.clientX
+      const newWidth = Math.max(300, Math.min(startWidth + diff, 1200))
+      setRightWidth(newWidth)
+      localStorage.setItem('rightWidth', newWidth.toString())
+    }
+
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+      document.body.style.userSelect = 'auto'
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+    document.body.style.userSelect = 'none'
+  }
+
   const fetchSchema = async () => {
     try {
       const res = await axios.get('http://localhost:8000/schema')
@@ -155,7 +209,7 @@ function App() {
   return (
     <div className="ide-layout">
       {/* Left Sidebar: Database Schema */}
-      <aside className="sidebar left-sidebar">
+      <aside className="sidebar left-sidebar" style={{ width: `${leftWidth}px`, minWidth: `${leftWidth}px` }}>
         <div className="sidebar-header">
           <h2>🗄️ Database</h2>
         </div>
@@ -178,6 +232,12 @@ function App() {
           ))}
         </div>
       </aside>
+
+      {/* Resizer izquierdo */}
+      <div
+        className="resizer resizer-left"
+        onMouseDown={handleMouseDownLeft}
+      />
 
       {/* Main Content: Editor & Results */}
       <main className="main-content">
@@ -247,8 +307,14 @@ function App() {
         </div>
       </main>
 
+      {/* Resizer derecho */}
+      <div
+        className="resizer resizer-right"
+        onMouseDown={handleMouseDownRight}
+      />
+
       {/* Right Sidebar: Statistics & Plot */}
-      <aside className="sidebar right-sidebar">
+      <aside className="sidebar right-sidebar" style={{ width: `${rightWidth}px`, minWidth: `${rightWidth}px` }}>
         <div className="sidebar-header">
           <h2>📊 Analytics & Plot</h2>
         </div>
