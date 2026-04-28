@@ -42,18 +42,18 @@ class Executor:
 
     def execute(self, ast):
         if not ast:
-            return
+            return None
         
         if ast['statement'] == 'CREATE':
-            self.execute_create(ast)
+            return self.execute_create(ast)
         elif ast['statement'] == 'SELECT':
-            self.execute_select(ast)
+            return self.execute_select(ast)
         elif ast['statement'] == 'INSERT':
-            self.execute_insert(ast)
+            return self.execute_insert(ast)
         elif ast['statement'] == 'DELETE':
-            self.execute_delete(ast)
+            return self.execute_delete(ast)
         elif ast['statement'] == 'DROP':
-            self.execute_drop(ast)
+            return self.execute_drop(ast)
     
     def _get_index_instance(self, tech_name, meta, key_column):
         tech = tech_name.upper() if tech_name else 'SEQUENTIAL'
@@ -156,55 +156,50 @@ class Executor:
 
     def execute_select(self, ast):
         table_name = ast['table']
-        if table_name not in self.catalog: return
+        if table_name not in self.catalog: 
+            raise Exception(f"La tabla {table_name} no existe en el catálogo.")
 
         cond = ast['condition']
         index = self.catalog[table_name].primary_index
         index.disk_reads = 0 
         meta = self.catalog[table_name]
         
+        columns = [col['name'] for col in meta.columns]
+        rows = []
+        plot_base64 = None
+        total_reads = 0
+        
         if cond['action'] == 'search':
             raw_result = index.search(cond['key'])
-            print(f"\nResultado de la búsqueda:")
-            
             if raw_result:
                 clean_result = meta.clean_tuple(raw_result)
-                print(clean_result)
-            else:
-                print("No encontrado.")
-                
-            print(f"-> Accesos a disco de lectura: {index.disk_reads}")
+                rows.append(clean_result)
+            total_reads = index.disk_reads
             
         elif cond['action'] == 'rangeSearch':
             raw_results = index.rangeSearch(cond['begin_key'], cond['end_key'])
-            print(f"\nResultados por rango ({len(raw_results)} filas):")
-            
             for r in raw_results:
-                print(meta.clean_tuple(r))
-                
-            print(f"-> Accesos a disco de lectura: {index.disk_reads}")
+                rows.append(meta.clean_tuple(r))
+            total_reads = index.disk_reads
         
         elif cond['action'] in ['knn', 'range_spatial']:
             point = cond['point']
             param = cond['param']
             is_knn = (cond['action'] == 'knn')
             
-            tipo_txt = f"KNN ({param} vecinos)" if is_knn else f"Radio ({param} unidades)"
-            print(f"\nEjecutando Búsqueda por {tipo_txt} alrededor de {point}...")
-            
             if is_knn:
                 raw_results = index.knn_search(point, param)
             else:
                 raw_results = index.rangeSearch(point, param)
             
-            total_reads = index.disk_reads + index.data_storage.disk_reads
+            total_reads = getattr(index, 'disk_reads', 0)
+            if hasattr(index, 'data_storage'):
+                total_reads += getattr(index.data_storage, 'disk_reads', 0)
             
             if raw_results:
-                clean_results_list = []
                 for r in raw_results:
                     clean = meta.clean_tuple(r)
-                    clean_results_list.append(clean)
-                    print(clean)
+                    rows.append(clean)
                     
                 # Generacion de imagen
                 spatial_col_idx = 0
@@ -215,17 +210,25 @@ class Executor:
                         
                 img_path = save_spatial_plot(
                     target_point=point, 
-                    clean_results=clean_results_list, 
+                    clean_results=rows, 
                     spatial_col_idx=spatial_col_idx, 
                     search_type="KNN" if is_knn else "RANGE", 
                     param=param,
                     data_dir=self.data_dir
                 )
-                print(f"-> Gráfico guardado en: {img_path}")
-            else:
-                print("No se encontraron resultados en esa área.")
                 
-            print(f"-> Accesos a disco de lectura R-Tree y Secuencial: {total_reads}")
+                import base64
+                if img_path and os.path.exists(img_path):
+                    with open(img_path, "rb") as image_file:
+                        plot_base64 = "data:image/png;base64," + base64.b64encode(image_file.read()).decode('utf-8')
+
+        return {
+            "columns": columns,
+            "rows": rows,
+            "diskReads": total_reads,
+            "diskWrites": 0,
+            "plot": plot_base64
+        }
 
     # Auxiliares
 

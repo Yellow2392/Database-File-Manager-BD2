@@ -1,129 +1,357 @@
-/* App.css General Styles */
+/* Full IDE Layout configuration */
 body {
-    background-color: #1e1e24;
-    color: #e0e0e0;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    justify-content: center;
-  }
-  
-  .container {
-    width: 90%;
-    max-width: 1000px;
-    margin-top: 50px;
-    background-color: #2b2b36;
-    padding: 30px;
-    border-radius: 10px;
-    box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.5);
-  }
-  
-  header h1 {
-    margin: 0;
-    color: #ffd700;
-  }
-  
-  .input-section {
-    display: flex;
-    flex-direction: column;
-    margin-top: 20px;
-  }
-  
-  textarea {
-    resize: vertical;
-    padding: 10px;
-    margin-top: 10px;
-    background-color: #1e1e24;
-    color: #fff;
-    border: 1px solid #444;
-    border-radius: 5px;
-    font-family: monospace;
-    font-size: 1em;
-  }
-  
-  button {
-    margin-top: 15px;
-    padding: 12px;
-    background-color: #007acc;
-    color: white;
-    border: none;
-    border-radius: 5px;
-    cursor: pointer;
-    font-weight: bold;
-    font-size: 1.1em;
-  }
-  
-  button:hover {
-    background-color: #005a99;
-  }
-  button:disabled {
-    background-color: #555;
-    cursor: not-allowed;
-  }
-  
-  .error-box {
-    margin-top: 15px;
-    background-color: #ff4d4d;
-    padding: 10px;
-    border-radius: 5px;
-    color: white;
-    font-weight: bold;
-  }
-  
-  /* Metrics Box */
-  .metrics {
-    display: flex;
-    gap: 15px;
-    margin-top: 20px;
-  }
-  
-  .metric-box {
-    flex: 1;
-    background-color: #444;
-    padding: 15px;
-    text-align: center;
-    border-radius: 8px;
-    font-size: 1em;
-  }
-  
-  /* Results table */
-  .results-section {
-    margin-top: 20px;
-  }
-  
-  .table-container {
-    margin-top: 20px;
-    overflow-x: auto;
-    max-height: 400px;
-  }
-  
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    background-color: #1e1e24;
-  }
-  
-  th, td {
-    padding: 10px;
-    border: 1px solid #444;
-    text-align: left;
-  }
-  
-  th {
-    background-color: #007acc;
-    color: white;
-    position: sticky;
-    top: 0;
-  }
-  
-  .image-result {
-    margin-top: 20px;
-    text-align: center;
-  }
-  
-  .image-result img {
-    max-width: 100%;
-    border-radius: 10px;
-    margin-top: 10px;
-  }
+  background-color: #121212;
+  color: #c9d1d9;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  margin: 0;
+  padding: 0;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.ide-layout {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  background-color: #181818;
+}
+
+/* Sidebar Styles */
+.sidebar {
+  background-color: #1e1e24;
+  border-right: 1px solid #333;
+  display: flex;
+  flex-direction: column;
+}
+
+.left-sidebar {
+  width: 250px;
+  min-width: 250px;
+}
+
+.right-sidebar {
+  width: 300px;
+  min-width: 300px;
+  border-left: 1px solid #333;
+  border-right: none;
+}
+
+.sidebar-header {
+  padding: 15px;
+  background-color: #25252b;
+  border-bottom: 1px solid #333;
+}
+
+.sidebar-header h2 {
+  font-size: 14px;
+  margin: 0;
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Left Sidebar: Schema */
+.schema-container {
+  padding: 10px;
+  overflow-y: auto;
+}
+
+.table-block {
+  margin-bottom: 15px;
+}
+
+.table-title {
+  font-size: 13px;
+  font-weight: bold;
+  color: #e0e0e0;
+  display: flex;
+  align-items: center;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #444;
+  margin-bottom: 5px;
+}
+
+.table-title .icon {
+  margin-right: 5px;
+}
+
+.index-badge {
+  margin-left: auto;
+  font-size: 10px;
+  background-color: #007acc;
+  color: white;
+  padding: 2px 5px;
+  border-radius: 4px;
+}
+
+.column-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 12px;
+}
+
+.column-list li {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 6px;
+  color: #bbb;
+}
+
+.col-name {
+  color: #8bacd9;
+}
+
+.col-type {
+  color: #e8a05f;
+}
+
+/* Main Editor Area */
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background-color: #1e1e1e;
+}
+
+.editor-pane {
+  flex: 0 0 40%;
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid #333;
+}
+
+.editor-toolbar {
+  padding: 10px 15px;
+  background-color: #2d2d30;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid #333;
+}
+
+.run-button {
+  background-color: #2ea043;
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 5px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.run-button:hover {
+  background-color: #3fb950;
+}
+
+.run-button:disabled {
+  background-color: #555;
+  cursor: not-allowed;
+}
+
+.editor-container {
+  display: flex;
+  flex: 1;
+  background-color: #1e1e1e;
+  overflow-y: auto;
+}
+
+.line-numbers {
+  padding: 15px 10px;
+  background-color: #252526;
+  color: #858585;
+  text-align: right;
+  user-select: none;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 14px;
+  line-height: 1.5;
+  border-right: 1px solid #333;
+  width: 25px;
+  flex-shrink: 0;
+}
+
+.editor-wrapper {
+  position: relative;
+  flex: 1;
+  min-height: 100%;
+}
+
+.highlight-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  padding: 15px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #d4d4d4;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  pointer-events: none;
+  z-index: 1;
+  box-sizing: border-box;
+}
+
+.sql-input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  padding: 15px;
+  background-color: transparent !important;
+  color: transparent !important; /* Se oculta el texto nativo para mostrar el highlight */
+  caret-color: #d4d4d4; /* El cursor sigue visible */
+  border: none;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 14px;
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+  z-index: 2;
+  box-sizing: border-box;
+}
+
+.sql-keyword { color: #569cd6; font-weight: bold; }
+.sql-type { color: #4ec9b0; }
+.sql-string { color: #ce9178; }
+.sql-number { color: #b5cea8; }
+
+/* Results Area */
+.results-pane {
+  flex: 1;
+  background-color: #181818;
+  overflow: auto;
+  position: relative;
+}
+
+.table-wrapper {
+  overflow: auto;
+  height: 100%;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th, td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #333;
+  border-right: 1px solid #333;
+  text-align: left;
+  white-space: nowrap;
+}
+
+th {
+  background-color: #252526;
+  color: #ddd;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  font-weight: 600;
+}
+
+tr:nth-child(even) {
+  background-color: #1e1e1e;
+}
+
+tr:hover {
+  background-color: #2a2d2e;
+}
+
+.empty-results {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  color: #666;
+  font-style: italic;
+}
+
+.error-box {
+  margin: 15px;
+  background-color: rgba(248, 81, 73, 0.1);
+  border: 1px solid #f85149;
+  color: #ff7b72;
+  padding: 12px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+/* Right Sidebar: Analytics & Plot */
+.metrics-container {
+  padding: 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-bottom: 1px solid #333;
+}
+
+.metric-card {
+  background-color: #25252b;
+  border: 1px solid #444;
+  border-radius: 6px;
+  padding: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.metric-title {
+  font-size: 12px;
+  color: #aaa;
+}
+
+.metric-value {
+  font-size: 14px;
+  font-weight: bold;
+  color: #fff;
+}
+
+.plot-container {
+  padding: 15px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.plot-container h3 {
+  font-size: 13px;
+  color: #bbb;
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+
+.plot-box {
+  flex: 1;
+  background-color: #1a1a1a;
+  border: 1px dashed #444;
+  border-radius: 6px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+  padding: 10px;
+}
+
+.plot-box img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+.no-plot-text {
+  color: #555;
+  font-size: 12px;
+  text-align: center;
+  padding: 20px;
+  margin-top: 10px;
+}

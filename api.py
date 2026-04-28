@@ -1,0 +1,61 @@
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+from backend.parser.sql_lexer import DBMSSqlLexer
+from backend.parser.sql_parser import DBMSSqlParser
+from backend.executor import Executor
+import time
+
+app = FastAPI()
+
+# Configurar CORS para que React pueda comunicarse con FastAPI sin bloqueos
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # Puedes limitarlo a ["http://localhost:5173"] 
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Estructura del cuerpo de la petición esperada desde Axios
+class QueryRequest(BaseModel):
+    query: str
+
+@app.post("/execute")
+def execute_query(request: QueryRequest):
+    try:
+        start_time = time.time()
+        
+        # 1. Parseo
+        lexer = DBMSSqlLexer()
+        parser = DBMSSqlParser(lexer.tokenize(request.query))
+        ast = parser.parse()
+        
+        # 2. Motor de Ejecución
+        motor = Executor()
+        resultados = motor.execute(ast) 
+        
+        execution_time = (time.time() - start_time) * 1000 # a milisegundos
+
+        if not resultados:
+            resultados = {"columns": [], "rows": [], "diskReads": 0, "diskWrites": 0, "plot": None}
+
+        # 3. Retornar los resultados en formato JSON manejable por React
+        return {
+            "columns": resultados.get("columns", []),
+            "rows": resultados.get("rows", []),
+            "metrics": {
+                "executionTime": f"{execution_time:.2f} ms",
+                "diskReads": resultados.get("diskReads", 0),
+                "diskWrites": resultados.get("diskWrites", 0)
+            },
+            "plot":  resultados.get("plot", None)
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
