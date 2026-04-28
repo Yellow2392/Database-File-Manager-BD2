@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
 import './App.css'
 
@@ -50,41 +50,106 @@ function App() {
   const [result, setResult] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [schema, setSchema] = useState([])
+  const [hoveredCoords, setHoveredCoords] = useState(null)
+  const plotContainerRef = useRef(null)
 
-  // Mapeo mock de las tablas para el sidebar izquierdo
-  const schemaMock = [
-    {
-      name: "Viajes", index: "R-Tree",
-      columns: [
-        { name: "ID", type: "INT" },
-        { name: "Pickup_Location", type: "POINT" },
-        { name: "Dropoff_Location", type: "POINT" },
-        { name: "Total_Amount", type: "FLOAT" }
-      ]
-    },
-    {
-      name: "Empleados", index: "Sequential",
-      columns: [
-        { name: "Employee_ID", type: "INT" },
-        { name: "Employee_Name", type: "VARCHAR" },
-        { name: "Age", type: "INT" }
-      ]
+  const fetchSchema = async () => {
+    try {
+      const res = await axios.get('http://localhost:8000/schema')
+      setSchema(res.data)
+    } catch (err) {
+      console.error('Error loading schema:', err)
     }
-  ]
+  }
+
+  useEffect(() => {
+    fetchSchema()
+  }, [])
+
+  useEffect(() => {
+    // Renderizar gráfico de Plotly cuando result.plot cambia
+    if (result && result.plot && plotContainerRef.current) {
+      try {
+        const plotData = JSON.parse(result.plot);
+        
+        // Obtener dimensiones del contenedor
+        const container = plotContainerRef.current;
+        const width = container.offsetWidth - 20; // Restar padding
+        const height = container.offsetHeight - 20;
+        
+        // Actualizar layout con dimensiones reales del contenedor
+        plotData.layout.width = width;
+        plotData.layout.height = height;
+        plotData.layout.autosize = true;
+        plotData.layout.margin = { l: 50, r: 50, t: 50, b: 50 };
+        
+        // Renderizar con configuración que permite zoom
+        const config = {
+          responsive: true,
+          displayModeBar: true,
+          displaylogo: false,
+          modeBarButtonsToAdd: ['pan2d', 'select2d', 'lasso2d', 'resetScale2d'],
+          toImageButtonOptions: {
+            format: 'png',
+            filename: 'rtree_plot',
+            height: 800,
+            width: 1000,
+            scale: 1
+          }
+        };
+        
+        window.Plotly.newPlot(container, plotData.data, plotData.layout, config);
+        
+        // Hacer responsivo en caso de redimensionar ventana
+        const handleResize = () => {
+          const newWidth = container.offsetWidth - 20;
+          const newHeight = container.offsetHeight - 20;
+          window.Plotly.relayout(container, { 
+            width: newWidth, 
+            height: newHeight 
+          });
+        };
+        
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+        
+      } catch (err) {
+        console.error('Error renderizando gráfico:', err);
+      }
+    }
+  }, [result?.plot])
 
   const executeQuery = async () => {
     setLoading(true)
     setError(null)
     setResult(null)
+    setHoveredCoords(null)
     
     try {
       const res = await axios.post('http://localhost:8000/execute', { query })
       setResult(res.data)
+      fetchSchema() // Refresh schema in case of CREATE table
     } catch (err) {
       setError(err.response?.data?.detail || err.message || 'Error en la consulta')
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleRowHover = (row) => {
+    // Busca las columnas de coordenadas (POINT)
+    const coordCols = [];
+    result.columns.forEach((colName, idx) => {
+      if (colName.toLowerCase().includes('location')) {
+        coordCols.push({ name: colName, idx: idx, value: row[idx] });
+      }
+    });
+    setHoveredCoords(coordCols);
+  }
+
+  const handleRowLeave = () => {
+    setHoveredCoords(null);
   }
 
   return (
@@ -95,7 +160,7 @@ function App() {
           <h2>🗄️ Database</h2>
         </div>
         <div className="schema-container">
-          {schemaMock.map((table, i) => (
+          {schema.map((table, i) => (
             <div key={i} className="table-block">
               <div className="table-title">
                 <span className="icon">📄</span> {table.name} 
@@ -163,7 +228,9 @@ function App() {
                 </thead>
                 <tbody>
                   {result.rows.map((row, idx) => (
-                    <tr key={idx}>
+                    <tr key={idx} 
+                        onMouseEnter={() => handleRowHover(row)}
+                        onMouseLeave={handleRowLeave}>
                       {row.map((val, i) => (
                         <td key={i}>{val !== null && val !== undefined ? String(val) : 'NULL'}</td>
                       ))}
@@ -203,13 +270,21 @@ function App() {
 
         <div className="plot-container">
           <h3>R-Tree Plot Viewer</h3>
-          <div className="plot-box">
-             {result && result.image_url ? (
-               <img src={`http://localhost:8000${result.image_url}`} alt="R-Tree Spatial Visualization" />
-             ) : (
+          <div className="plot-box" ref={plotContainerRef}>
+             {!result || !result.plot ? (
                <div className="no-plot-text">No data to plot. Use a Spatial Query to visualize.</div>
-             )}
+             ) : null}
           </div>
+          {hoveredCoords && hoveredCoords.length > 0 && (
+            <div className="coordinates-info">
+              <strong>📍 Coordenadas:</strong>
+              {hoveredCoords.map((coord, idx) => (
+                <div key={idx} className="coords-row">
+                  <strong>{coord.name}:</strong> {coord.value}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </aside>
     </div>

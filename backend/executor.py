@@ -208,7 +208,7 @@ class Executor:
                         spatial_col_idx = i
                         break
                         
-                img_path = save_spatial_plot(
+                result = save_spatial_plot(
                     target_point=point, 
                     clean_results=rows, 
                     spatial_col_idx=spatial_col_idx, 
@@ -217,10 +217,15 @@ class Executor:
                     data_dir=self.data_dir
                 )
                 
-                import base64
-                if img_path and os.path.exists(img_path):
-                    with open(img_path, "rb") as image_file:
-                        plot_base64 = "data:image/png;base64," + base64.b64encode(image_file.read()).decode('utf-8')
+                # Manejo de retorno dual: (filepath, html_string)
+                if result:
+                    if isinstance(result, tuple):
+                        img_path, plot_html = result
+                        plot_base64 = plot_html  # Enviamos el HTML interactivo
+                    else:
+                        # Compatibilidad con versiones anteriores si solo retorna filepath
+                        img_path = result
+                        plot_base64 = None
 
         return {
             "columns": columns,

@@ -3,7 +3,7 @@
 **Curso:** Base de Datos 2  
 **Institución:** Universidad de Ingeniería y Tecnología (UTEC)  
 **Integrantes:**
-- [Nombre Integrante 1]
+- Sebastian Romero Pahuara
 - [Nombre Integrante 2]
 - [Nombre Integrante 3]
 - [Nombre Integrante 4]

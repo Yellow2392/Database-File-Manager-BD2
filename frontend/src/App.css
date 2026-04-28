@@ -30,10 +30,13 @@ body {
 }
 
 .right-sidebar {
-  width: 300px;
-  min-width: 300px;
+  width: 700px;
+  min-width: 700px;
   border-left: 1px solid #333;
   border-right: none;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .sidebar-header {
@@ -112,10 +115,11 @@ body {
   display: flex;
   flex-direction: column;
   background-color: #1e1e1e;
+  min-width: 0;
 }
 
 .editor-pane {
-  flex: 0 0 40%;
+  flex: 0 0 25%;
   display: flex;
   flex-direction: column;
   border-bottom: 1px solid #333;
@@ -228,6 +232,7 @@ body {
   background-color: #181818;
   overflow: auto;
   position: relative;
+  min-height: 0;
 }
 
 .table-wrapper {
@@ -320,6 +325,8 @@ tr:hover {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .plot-container h3 {
@@ -337,8 +344,10 @@ tr:hover {
   display: flex;
   justify-content: center;
   align-items: center;
-  overflow: hidden;
+  overflow: auto;
   padding: 10px;
+  min-height: 0;
+  position: relative;
 }
 
 .plot-box img {
@@ -354,4 +363,27 @@ tr:hover {
   text-align: center;
   padding: 20px;
   margin-top: 10px;
+}
+
+.coordinates-info {
+  padding: 12px 15px;
+  background-color: #25252b;
+  border-top: 1px solid #333;
+  font-size: 11px;
+  color: #aaa;
+  line-height: 1.6;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.coordinates-info strong {
+  color: #fff;
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.coords-row {
+  padding: 2px 0;
+  color: #8bacd9;
 }
