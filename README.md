@@ -12,7 +12,7 @@
 ---
 
 ## 1. Introducción y Objetivo
-El objetivo principal de este proyecto es implementar un sistema gestor de almacenamiento en memoria secundaria simulado completamente desde cero utilizando Python. Este sistema permite interactuar con tablas a través de un dialecto SQL y evalúa empíricamente la eficiencia de distintas técnicas de indexación (Archivos Secuenciales y R-Tree) mediante el conteo de accesos a páginas en disco y el registro del tiempo de ejecución. No se utilizan motores de bases de datos externos, garantizando que toda E/S de datos esté controlada explícitamente y empaquetada en bloques fijos de bytes.
+El objetivo principal de este proyecto es implementar un sistema gestor de almacenamiento en memoria secundaria simulado completamente desde cero utilizando Python. Este sistema permite interactuar con tablas a través de un dialecto SQL y evalúa empíricamente la eficiencia de distintas técnicas de indexación (Sequential File, Extendible Hashing, B+ Tree, R-Tree) mediante el conteo de accesos a páginas en disco y el registro del tiempo de ejecución. Además, se da soporte a consultas para bases de datos espaciales, definiendo las operaciones recurrentes de este tipo de manejo. No se utilizan motores de bases de datos externos, garantizando que toda E/S de datos esté controlada explícitamente y empaquetada en bloques fijos de bytes. 
 
 ---
 
@@ -22,19 +22,27 @@ El objetivo principal de este proyecto es implementar un sistema gestor de almac
 Esta técnica organiza los registros físicamente en el disco basándose en un atributo clave de ordenamiento.
 
 - **Estructura Físico-Lógica:** Se implementa utilizando un Archivo Principal (Main File) con los registros ordenados y un Archivo Auxiliar (Aux File) para agilizar las inserciones antes de un proceso de reconstrucción (rebuild).
-- **Algoritmo de Inserción:** 
-  *[Describe brevemente cómo decides agregar al Main File o al Aux File y cómo manejas la capacidad]*
-- **Algoritmo de Búsqueda:** Búsqueda binaria a nivel de páginas dentro del archivo principal y recorrido lineal en las páginas del archivo auxiliar.
-- **[Añadir diagrama de estructura aquí]**
+- **Algoritmo de Inserción:** Se realiza una inserción sobre el archivo auxiliar, leyendo la última página. Si el tamaño *k* del archivo auxiliar es mayor o igual a $\sqrt{n}$, donde *n* es el tamaño del archivo, se procede a realizar una reconstrucción fusionando el archivo principal y con el auxiliar. 
+- **Algoritmo de Búsqueda:** Se hace una búsqueda binaria a nivel de páginas dentro del archivo principal y recorrido lineal en las páginas del archivo auxiliar.
+- **Algoritmo de Búsqueda por Rango:** Se aprovecha el orden en el archivo principal para realizar una búsqueda binaria con la llave inicial. Una vez encontrado el inicio, empieza a recorrer ordenadamente el resto del archivo principal y secuencialmente el auxiliar para encontrar el último registro dentro del rango especificado.
+- **Algoritmo de Eliminación:** Se busca al registro a eliminar mediante una búsqueda binaria sobre el archivo principal y sobre una búsqueda lineal sobre el archivo auxiliar. Una vez encontrado, marca al registro como eliminado y no se tiene encuenta para futuras consultas. Este se elimina una vez se llama a la reconstrucción del archivo.
+- **Algoritmo de Inserción Masiva:** Se hace una inserción de los registros en el archivo auxiliar sin aplicar la verificación y recontrucción sobre los archivos. Una vez insertados todos, se hace una reconstrucción global donde se ordenan los registros en el archivo secuencial.
 
-### 2.2. Índice Espacial (R-Tree)
-Estructura de árbol diseñada para indexar información multidimensional, utilizada para procesar los datos de ubicaciones geográficas (*Pickup_Location* / *Dropoff_Location*).
+![Archivo Secuencial](./images/seq_file.png "Archivo Secuencial")
 
-- **Estructura Físico-Lógica:** Nodos agrupados en páginas del disco como Minimum Bounding Rectangles (MBRs).
+### 2.2. Extendible Hashing
+
+### 2.3. B+ Tree
+
+### 2.4. Índice Espacial (R-Tree)
+Estructura de árbol diseñada para indexar información multidimensional. Utilizada para procesar los datos de ubicaciones geográficas (*Pickup_Location* / *Dropoff_Location*).
+
+- **Estructura Físico-Lógica:** Nodos agrupados en páginas del disco como Minimum Bounding Boxes (MBBs).
 - **Algoritmo de Inserción / Construcción:** 
   *[Describe cómo se realiza el particionamiento de nodos y la carga masiva]*
 - **Algoritmo de Búsqueda (Point y Radius/KNN):** Funciona descartando los rectángulos delimitadores que no intersecan con el área de interés establecida.
-- **[Añadir diagrama de estructura espacial aquí]**
+
+![RTree](./images/r_tree.png "RTree")
 
 ---
 
