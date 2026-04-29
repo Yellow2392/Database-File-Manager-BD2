@@ -12,7 +12,7 @@ app = FastAPI()
 # Configurar CORS para que React pueda comunicarse con FastAPI sin bloqueos
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Puedes limitarlo a ["http://localhost:5173"] 
+    allow_origins=["*"],  
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -21,6 +21,27 @@ app.add_middleware(
 # Estructura del cuerpo de la petición esperada desde Axios
 class QueryRequest(BaseModel):
     query: str
+
+@app.get("/schema")
+def get_schema():
+    try:
+        motor = Executor()
+        schema = []
+        for table_name, meta in motor.catalog.items():
+            index_name = meta.primary_index.__class__.__name__ if meta.primary_index else "Sequential"
+            if index_name == "SequentialFile":
+                index_name = "Sequential"
+            elif index_name == "RTreeIndex":
+                index_name = "R-Tree"
+            
+            schema.append({
+                "name": table_name,
+                "index": index_name,
+                "columns": meta.columns
+            })
+        return schema
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/execute")
 def execute_query(request: QueryRequest):

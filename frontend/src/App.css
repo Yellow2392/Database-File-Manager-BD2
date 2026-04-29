@@ -25,15 +25,30 @@ body {
 }
 
 .left-sidebar {
-  width: 250px;
-  min-width: 250px;
+  flex: 0 0 auto;
+  border-right: 1px solid #333;
 }
 
 .right-sidebar {
-  width: 300px;
-  min-width: 300px;
+  flex: 0 0 auto;
   border-left: 1px solid #333;
   border-right: none;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.resizer {
+  width: 5px;
+  background-color: #333;
+  cursor: col-resize;
+  user-select: none;
+  transition: background-color 0.2s ease;
+}
+
+.resizer:hover {
+  background-color: #0e639c;
+  box-shadow: 0 0 10px rgba(14, 99, 156, 0.5);
 }
 
 .sidebar-header {
@@ -112,10 +127,11 @@ body {
   display: flex;
   flex-direction: column;
   background-color: #1e1e1e;
+  min-width: 0;
 }
 
 .editor-pane {
-  flex: 0 0 40%;
+  flex: 0 0 25%;
   display: flex;
   flex-direction: column;
   border-bottom: 1px solid #333;
@@ -228,6 +244,7 @@ body {
   background-color: #181818;
   overflow: auto;
   position: relative;
+  min-height: 0;
 }
 
 .table-wrapper {
@@ -320,6 +337,8 @@ tr:hover {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .plot-container h3 {
@@ -337,8 +356,10 @@ tr:hover {
   display: flex;
   justify-content: center;
   align-items: center;
-  overflow: hidden;
+  overflow: auto;
   padding: 10px;
+  min-height: 0;
+  position: relative;
 }
 
 .plot-box img {
@@ -354,4 +375,79 @@ tr:hover {
   text-align: center;
   padding: 20px;
   margin-top: 10px;
+}
+
+.coordinates-info {
+  padding: 12px 15px;
+  background-color: #25252b;
+  border-top: 1px solid #333;
+  font-size: 11px;
+  color: #aaa;
+  line-height: 1.6;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.coordinates-info strong {
+  color: #fff;
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.coords-row {
+  padding: 2px 0;
+  color: #8bacd9;
+}
+
+
+.toast {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 9999;
+  min-width: 240px;
+  max-width: 360px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  animation: toastIn 0.2s ease-out;
+}
+
+.toast-success {
+  background: #1f7a39;
+  border: 1px solid #2ea043;
+}
+
+.toast-error {
+  background: #8b1e1e;
+  border: 1px solid #f85149;
+}
+
+.toast-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.15);
+  flex: 0 0 22px;
+}
+
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

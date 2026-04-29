@@ -5,6 +5,7 @@ import math
 import csv
 
 from .base import BaseIndex
+from backend.external.external_sort import ExternalSort
 
 class SequentialFile(BaseIndex):
     def __init__(self, table_meta, key_column, data_dir="backend/data"):
@@ -167,6 +168,13 @@ class SequentialFile(BaseIndex):
         
         f.write(full_page)
         self.disk_writes += 1
+    
+    def _write_page_simple(self, f_out, records):
+        # Helper auxiliar para escribir páginas rápidamente durante la transcripción
+        header = struct.pack('i 12x', len(records))
+        data = b''.join(struct.pack(self.table_meta.struct_format, *r) for r in records)
+        padding = b'\x00' * (self.PAGE_SIZE - 16 - len(data))
+        f_out.write(header + data + padding)
         
     def _count_aux_records(self):
         # Cuenta los registros leyendo solo los headers de las páginas auxiliares
@@ -361,101 +369,64 @@ class SequentialFile(BaseIndex):
         return resultados
     
     def _rebuild(self):  # Reconstruye el archivo secuencial fusionando el main y el aux sin desbordar la memoria
-        # Se carga el auxiliar a RAM
-        aux_records = []
-        tamano_aux = os.path.getsize(self.aux_file)
-        if tamano_aux > 0:
-            with open(self.aux_file, 'rb') as f:
-                for i in range(tamano_aux // self.PAGE_SIZE):
-                    page_data = f.read(self.PAGE_SIZE)
-                    self.disk_reads += 1
-                    num_records = struct.unpack('i 12x', page_data[:16])[0]
-                    for j in range(num_records):
-                        offset = 16 + (j * self.table_meta.record_size)
-                        record_bytes = page_data[offset : offset + self.table_meta.record_size]
-                        record_tuple = struct.unpack(self.table_meta.struct_format, record_bytes)
-                        
-                        if not record_tuple[-1]: # Se ignoran los borrados
-                            aux_records.append(record_tuple)
-                            
-        # Se ordena en ram
-        aux_records.sort(key=lambda x: x[0])
+        # main_file + aux_file -> heap temporal
+        temp_heap_file = os.path.join(self.data_dir, f"{self.table_meta.name}_temp_rebuild.dat")
+        with open(temp_heap_file, 'wb') as f_out:
+            for file_to_read in [self.main_file, self.aux_file]:
+                if os.path.getsize(file_to_read) > 0:
+                    with open(file_to_read, 'rb') as f_in:
+                        shutil.copyfileobj(f_in, f_out)
         
-        # Merge: Main + Aux -> Temp File
-        temp_file = os.path.join(os.path.dirname(self.main_file), "temp_main.dat")
-        tamano_main = os.path.getsize(self.main_file)
+        # Ordenamiento externo
+        sorter = ExternalSort(
+            record_format=self.table_meta.struct_format, 
+            page_size=self.PAGE_SIZE, 
+            buffer_size=2 * 1024 * 1024 
+        )
+        sorter.external_sort(temp_heap_file, self.main_file, sort_key_index=0)
         
-        out_page_data = bytearray()
-        out_records = 0
-        
-        with open(self.main_file, 'rb') as f_in, open(temp_file, 'wb') as f_out:
-            num_pages_main = tamano_main // self.PAGE_SIZE
-            
-            for i in range(num_pages_main):
-                page_data = f_in.read(self.PAGE_SIZE)
-                self.disk_reads += 1
-                num_records_main = struct.unpack('i 12x', page_data[:16])[0]
-                
-                for j in range(num_records_main):
-                    offset = 16 + (j * self.table_meta.record_size)
-                    record_bytes = page_data[offset : offset + self.table_meta.record_size]
-                    main_record = struct.unpack(self.table_meta.struct_format, record_bytes)
-                    
-                    if main_record[-1]: # Ignora borrados
-                        continue
-                        
-                    # Mientras los registros del auxiliar sean menores que el actual del main, se insertan primeros
-                    while aux_records and aux_records[0][0] < main_record[0]:
-                        aux_rec = aux_records.pop(0)
-                        out_page_data.extend(struct.pack(self.table_meta.struct_format, *aux_rec))
-                        out_records += 1
-                        
-                        if out_records == self.table_meta.block_factor:
-                            self._write_page(f_out, f_out.tell(), out_page_data, out_records)
-                            out_page_data = bytearray()
-                            out_records = 0
-                            
-                    # Ahora insertar el registro del main
-                    out_page_data.extend(record_bytes)
-                    out_records += 1
-                    
-                    if out_records == self.table_meta.block_factor:
-                        self._write_page(f_out, f_out.tell(), out_page_data, out_records)
-                        out_page_data = bytearray()
-                        out_records = 0
-
-            # Inserta los registros del auxiliar que hayan sobrado
-            for aux_rec in aux_records:
-                out_page_data.extend(struct.pack(self.table_meta.struct_format, *aux_rec))
-                out_records += 1
-                if out_records == self.table_meta.block_factor:
-                    self._write_page(f_out, f_out.tell(), out_page_data, out_records)
-                    out_page_data = bytearray()
-                    out_records = 0
-                    
-            # Flush para página incompleta
-            if out_records > 0:
-                self._write_page(f_out, f_out.tell(), out_page_data, out_records)
-
-        shutil.move(temp_file, self.main_file)
-        open(self.aux_file, 'wb').close()
-
-        self.total_main_records = self._count_main_records()
+        os.remove(temp_heap_file)
+        open(self.aux_file, 'wb').close() 
+        print("Reconstrucción finalizada.")
     
     def bulk_load(self, csv_path, delimiter = ','): # Implementación de carga masiva
-        with open(csv_path, 'r', encoding='utf-8') as f:
-            reader = csv.reader(f, delimiter=delimiter) 
+        #! Fase 1
+        temp_heap_file = os.path.join(self.data_dir, f"{self.table_meta.name}_temp_heap.dat")
+        
+        # CSV -> Binario temporal
+        current_page_records = []
+        with open(csv_path, 'r', encoding='utf-8') as f_in, open(temp_heap_file, 'wb') as f_out:
+            reader = csv.reader(f_in, delimiter=delimiter)
             next(reader, None)
             
             for row in reader:
-                parsed_values = self._parse_row(row, self.table_meta.columns)
+                parsed_row = self._parse_row(row, self.table_meta.columns)
+                current_page_records.append(parsed_row)
                 
-                self.add(parsed_values, is_bulk=True)
-                
-        # Solo una reconstrucción global
-        print("Carga de CSV finalizada. Ordenando archivo principal (Rebuild)...")
-        self._rebuild()
-        self.total_main_records = self._count_main_records()
+                if len(current_page_records) == self.table_meta.block_factor:
+                    self._write_page_simple(f_out, current_page_records)
+                    current_page_records = []
+                    
+            if current_page_records:
+                self._write_page_simple(f_out, current_page_records)
+
+        #! Fase 2
+        sorter = ExternalSort(
+            record_format=self.table_meta.struct_format, 
+            page_size=self.PAGE_SIZE, 
+            buffer_size=2 * 1024 * 1024  # 2 MB de memoria RAM al buffer
+        )
+        
+        #TODO: Asumimos que la llave primaria es la columna 0. Si no, calculalo dinámicamente.
+        stats = sorter.external_sort(temp_heap_file, self.main_file, sort_key_index=0)
+        
+        os.remove(temp_heap_file)
+        open(self.aux_file, 'wb').close() # El auxiliar empieza vacío
+        
+        self.disk_reads += stats['pages_read']
+        self.disk_writes += stats['pages_written']
+        
+        print(f"[OK] Carga masiva completada en {stats['time_total_sec']}s.")
 
     def _parse_row(self, row, columns):
         # Convierte los strings del CSV a int, float o bytes según la metadata
