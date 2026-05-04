@@ -450,6 +450,13 @@ class SequentialFile(BaseIndex):
                 val = row[csv_index].strip()
                 if tipo == 'INT': parsed.append(int(val))
                 elif tipo == 'FLOAT': parsed.append(float(val))
+                elif tipo == 'BOOLEAN':
+                    val_str = str(val).strip().upper()
+                    es_verdadero = val_str in ('TRUE', '1', 'T', 'YES', 'Y') # Formas de decir "verdadero"
+                    parsed.append(es_verdadero)
+                elif tipo == 'DATE': 
+                    val_str = str(val).strip()[:19]
+                    parsed.append(val_str.encode('utf-8'))
                 elif tipo == 'VARCHAR': parsed.append(val.encode('utf-8'))
                 csv_index += 1
 
