@@ -43,7 +43,16 @@ class RTreeIndex(BaseIndex):
         # El sequential manejará los datos pesados
         self.data_storage = SequentialFile(table_meta, key_column, data_dir)
         
-        self.M = 200 # maxEntries
+        self.header_fmt = '=? i 11x' 
+        # min_x, min_y, max_x, max_y (4 floats = 16 bytes) + pointer (1 int = 4 bytes)
+        self.entry_fmt = '=f f f f i' 
+        self.header_size = struct.calcsize(self.header_fmt)
+        self.entry_size = struct.calcsize(self.entry_fmt)
+
+        espacio_disponible = self.PAGE_SIZE - self.header_size
+
+        self.M = espacio_disponible // self.entry_size  # Capacidad máxima del nodo
+        #self.M = 200
         self.m = self.M // 2
         
         # Formato de cabecera: is_leaf (?), num_entries (i), padding (11x)

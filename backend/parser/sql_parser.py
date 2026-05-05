@@ -99,7 +99,7 @@ class DBMSSqlParser:
             
             # Reconocer el tipo de dato
             type_token = self.current_token()
-            if type_token.type not in ('INT', 'FLOAT', 'VARCHAR', 'POINT'):
+            if type_token.type not in ('INT', 'FLOAT', 'VARCHAR', 'POINT', 'BOOLEAN', 'DATE'):
                 raise SyntaxError(f"Tipo de dato no válido: {type_token.value}")
             col_type = self.match(type_token.type).value
             

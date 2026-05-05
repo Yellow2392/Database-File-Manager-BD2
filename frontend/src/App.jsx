@@ -18,7 +18,7 @@ const highlightSQL = (text) => {
     'FILE', 'DELIMITER', 'BETWEEN'
   ];
   
-  const types = ['INT', 'VARCHAR', 'FLOAT'];
+  const types = ['INT', 'VARCHAR', 'FLOAT', 'BOOLEAN', 'DATE'];
 
   const allKeywords = [...keywords, ...types];
   const regex = new RegExp(

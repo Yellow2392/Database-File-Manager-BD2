@@ -8,7 +8,9 @@ TYPE_MAP = {
     'INT': {'fmt': 'i', 'size': 4},
     'FLOAT': {'fmt': 'f', 'size': 4},
     'VARCHAR': {'fmt': '50s', 'size': 50}, # Se asume tamaño fijo de 50 bytes para VARCHAR
-    'POINT': {'fmt': 'ff', 'size': 8} # TODO: Revisar el manejo de POINT. Por ahora está como un tipo mapeable
+    'BOOLEAN': {'fmt': '?', 'size': 1},
+    'DATE': {'fmt': '19s', 'size': 19}, #! Considero "YYYY-MM-DD HH:mm:ss" e internamente tipo string
+    'POINT': {'fmt': 'ff', 'size': 8}
 }
 
 class TableMetadata:
@@ -57,6 +59,10 @@ class TableMetadata:
                     cleaned.append(val.decode('utf-8').rstrip('\x00'))
                 elif tipo == 'FLOAT':
                     cleaned.append(round(val, 2))
+                elif tipo == 'BOOLEAN':
+                    cleaned.append(True if val else False)
+                elif tipo == 'DATE':
+                    cleaned.append(val.decode('utf-8').rstrip('\x00'))
                 else:
                     cleaned.append(val)
                     
