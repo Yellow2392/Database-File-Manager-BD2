@@ -441,6 +441,68 @@ tr:hover {
   flex: 0 0 22px;
 }
 
+.view-tabs {
+  display: flex;
+  background: #1e1e1e;
+  border-bottom: 1px solid #333;
+}
+
+.view-tabs button {
+  padding: 10px 20px;
+  background: transparent;
+  color: #888;
+  border: none;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.view-tabs button.active {
+  color: #fff;
+  border-bottom: 2px solid #007acc;
+}
+
+.dual-editor-container {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  padding: 15px;
+  height: 50%;
+}
+
+.editor-block label {
+  color: #aaa;
+  font-size: 0.8rem;
+  margin-bottom: 5px;
+  display: block;
+}
+
+.editor-wrapper.small {
+  height: 120px;
+}
+
+.log-console {
+  background: #0f0f0f;
+  padding: 10px;
+  border-radius: 5px;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.85rem;
+  color: #d4d4d4;
+  overflow-y: auto;
+  max-height: 500px;
+  border: 1px solid #333;
+}
+
+.log-line {
+  padding: 2px 0;
+  border-bottom: 1px solid #1a1a1a;
+}
+
+.log-number {
+  color: #555;
+  margin-right: 10px;
+  user-select: none;
+}
+
 @keyframes toastIn {
   from {
     opacity: 0;
