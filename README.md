@@ -39,8 +39,25 @@ Esta técnica organiza los registros físicamente en el disco basándose en un a
 ![Archivo Secuencial](./images/seq_file.png "Archivo Secuencial")
 
 ### 2.2. Extendible Hashing
+Estructura de indexación dinámica diseñada para realizar búsquedas exactas (*point queries*) en tiempo casi constante.
+
+- **Estructura Físico-Lógica:** Se implementa mediante una tabla de directorios (Directory Table) de tamaño $2^d$ (donde $d$ es la profundidad global) que apunta a *buckets* individuales en el disco. Cada bucket tiene una profundidad local que puede crecer independientemente.
+- **Algoritmo de Inserción:** Se calcula el hash de la clave para obtener los primeros $d$ bits, que indexan directamente en el directorio. Si el bucket tiene espacio, se inserta el registro. Si el bucket está lleno, se duplica el bucket (split) y se redistribuyen los registros. Si la profundidad local alcanza la profundidad global, se duplica el directorio completo.
+- **Algoritmo de Búsqueda:** Se aplica la función hash a la clave de búsqueda, se utilizan los primeros $d$ bits para indexar en el directorio y se accede directamente al bucket correspondiente. La búsqueda dentro del bucket es lineal.
+- **Algoritmo de Eliminación:** Se busca el registro mediante el algoritmo de búsqueda. Una vez encontrado, se marca como eliminado. Si el bucket queda vacío tras sucesivas eliminaciones, puede fusionarse con su buddy bucket (si lo hay) durante operaciones de mantenimiento.
+- **Ventajas:** Crecimiento dinámico sin necesidad de reorganización global frecuente. El directorio crece de forma logarítmica respecto al número de registros.
+- **Algoritmo de Split:** Cuando un bucket se llena, se duplica su tamaño y se rehashean los registros usando $d_{local} + 1$ bits. Si el directorio también necesita crecer, se duplica su tamaño duplicando todos los punteros.
 
 ### 2.3. B+ Tree
+Árbol balanceado diseñado para soportar búsquedas por rango (*range queries*) y acceso ordenado a los datos de forma eficiente.
+
+- **Estructura Físico-Lógica:** Se implementa como un árbol balanceado donde todos los nodos hoja están al mismo nivel y conectados entre sí mediante punteros (linked list). Los nodos internos actúan como índices de navegación, mientras que las hojas contienen los registros reales o punteros a ellos.
+- **Algoritmo de Inserción:** Se realiza una búsqueda para localizar la hoja donde debe insertarse la clave. Si la hoja tiene espacio, se inserta directamente. Si la hoja está llena, se divide en dos nodos y la clave media se propaga al nodo padre. Este proceso puede causar divisiones en cascada hasta alcanzar la raíz.
+- **Algoritmo de Búsqueda Puntual:** Se comienza desde la raíz y se navega descendentemente comparando la clave con los valores de separación en cada nodo interno. Una vez alcanzada la hoja, se busca linealmente el registro.
+- **Algoritmo de Búsqueda por Rango:** Se localiza la hoja que contiene el límite inferior del rango. Luego, se recorren las hojas de forma secuencial (siguiendo los punteros enlazados) hasta encontrar el límite superior, recolectando todos los registros en el rango.
+- **Algoritmo de Eliminación:** Se localiza el registro mediante búsqueda. Se elimina de la hoja. Si la hoja queda por debajo del mínimo número de entradas permitidas (*underflow*), se fusiona con una hoja hermana o se redistribuyen las entradas. Este proceso puede propagarse hacia arriba hasta la raíz.
+- **Orden del Árbol:** El número de entradas por nodo se determina basándose en el tamaño de página (PAGE_SIZE) y el tamaño de las claves, permitiendo múltiples entradas por página para minimizar accesos a disco.
+- **Balanceo Garantizado:** Todos los nodos hoja están al mismo nivel, garantizando que cualquier búsqueda realiza el mismo número de accesos a disco en el peor caso.
 
 ### 2.4. Índice Espacial (R-Tree)
 Estructura de árbol diseñada para indexar información multidimensional. Utilizada para procesar los datos de ubicaciones geográficas (*Pickup_Location* / *Dropoff_Location*).
@@ -103,12 +120,34 @@ Para los experimentos se usó el dataset público de *Yellow Tripdata de Nueva Y
 ---
 
 ## 7. Despliegue y Ejecución
+Se ha dockerizado la aplicación para despliegue local.
 
-Se ha empaquetado el sistema empleando contenedores para aislar sus dependencias.
+Requisitos:
+- Docker Desktop (daemon corriendo).
 
-**Vía Docker Compose (Recomendado):**
-1. Asegurarse de tener instalado Docker Desktop.
-2. Posicionarse en la carpeta raíz del repositorio.
-3. Levantar la aplicación con:
-   ```bash
-   docker-compose up --build
+Comandos esenciales (desde la raíz):
+
+```bash
+docker-compose up --build        # build y levantar (foreground)
+docker-compose up -d --build     # levantar en background
+docker-compose down              # parar y eliminar contenedores
+docker-compose build --no-cache  # reconstruir sin caché
+```
+
+Puertos:
+- Frontend: http://localhost:5173
+- Backend: http://localhost:8000 (Swagger: http://localhost:8000/docs)
+
+Notas rápidas:
+- Use `localhost` en el navegador (no `0.0.0.0`).
+- Si añade dependencias Python: actualizar `requirements.txt` y ejecutar `docker-compose build --no-cache backend`.
+- Si añade dependencias de frontend: ejecutar `npm install` en `frontend/` y reconstruir.
+
+Comandos útiles de depuración:
+
+```bash
+docker-compose logs -f backend
+docker compose exec backend sh
+```
+
+Eso es todo: con estos comandos la aplicación quedará accesible y los datos persistirán en las rutas montadas por volumen.
