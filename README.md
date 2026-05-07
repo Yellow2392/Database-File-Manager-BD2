@@ -12,8 +12,15 @@
 ---
 
 ## 1. Introducción y Objetivo
-El objetivo principal de este proyecto es implementar un sistema gestor de almacenamiento en memoria secundaria simulado completamente desde cero utilizando Python. Este sistema permite interactuar con tablas a través de un dialecto SQL y evalúa empíricamente la eficiencia de distintas técnicas de indexación (Archivos Secuenciales y R-Tree) mediante el conteo de accesos a páginas en disco y el registro del tiempo de ejecución. No se utilizan motores de bases de datos externos, garantizando que toda E/S de datos esté controlada explícitamente y empaquetada en bloques fijos de bytes.
+El objetivo principal de este proyecto es implementar un sistema gestor de almacenamiento en memoria secundaria simulado completamente desde cero utilizando Python. No se utilizan motores de bases de datos relacionales ni librerías de persistencia externas, garantizando que toda entrada y salida (E/S) de datos esté controlada explícitamente y empaquetada en bloques fijos de disco (paginación).
 
+Para interactuar con el sistema, se ha desarrollado un **Parser y Lexer SQL propio** que procesa sentencias de consulta. A través de este, el sistema evalúa empíricamente la eficiencia de cuatro técnicas de indexación fundamentales:
+*   **Archivo Secuencial (Sequential File):** Para el almacenamiento estructurado de registros contiguos, combinando un archivo principal ordenado y un archivo auxiliar.
+*   **Hash Extensible (Extendible Hashing):** Para la indexación dinámica y búsquedas exactas (*point queries*) en tiempo constante $O(1)$, basado en una tabla de directorios y *buckets* que se dividen según su profundidad global y local.
+*   **Árbol B+ (B+ Tree):** Para soportar búsquedas eficientes por rangos (*range queries*), manteniendo un árbol balanceado con punteros enlazados a nivel de nodos hoja.
+*   **Índice Espacial (R-Tree):** Para la indexación de coordenadas y polígonos, que brinda soporte a consultas espaciales nativas como K-Nearest Neighbors (KNN) y búsquedas geográficas por radio.
+
+El sistema también cuenta con un simulador de **Gestor de Transacciones Concurrente (Isolation Manager)** manejado por *locks* a nivel de registro para prevenir colisiones asíncronas. El propósito final del informe es contrastar el rendimiento teórico (Notación Big O) frente a los resultados prácticos, midiendo el conteo exacto de accesos a páginas físicas en disco (*disk reads/writes*) y los tiempos reales de ejecución.
 ---
 
 ## 2. Descripción de Técnicas y Algoritmos Implementados
@@ -22,19 +29,28 @@ El objetivo principal de este proyecto es implementar un sistema gestor de almac
 Esta técnica organiza los registros físicamente en el disco basándose en un atributo clave de ordenamiento.
 
 - **Estructura Físico-Lógica:** Se implementa utilizando un Archivo Principal (Main File) con los registros ordenados y un Archivo Auxiliar (Aux File) para agilizar las inserciones antes de un proceso de reconstrucción (rebuild).
-- **Algoritmo de Inserción:** 
-  *[Describe brevemente cómo decides agregar al Main File o al Aux File y cómo manejas la capacidad]*
-- **Algoritmo de Búsqueda:** Búsqueda binaria a nivel de páginas dentro del archivo principal y recorrido lineal en las páginas del archivo auxiliar.
-- **[Añadir diagrama de estructura aquí]**
+- **Algoritmo de Inserción:** Se realiza una inserción sobre el archivo auxiliar, leyendo la última página. Si el tamaño *k* del archivo auxiliar es mayor o igual a $\sqrt{n}$, donde *n* es el tamaño del archivo, se procede a realizar una reconstrucción fusionando el archivo principal y con el auxiliar. 
+- **Algoritmo de Búsqueda:** Se hace una búsqueda binaria a nivel de páginas dentro del archivo principal y recorrido lineal en las páginas del archivo auxiliar.
+- **Algoritmo de Búsqueda por Rango:** Se aprovecha el orden en el archivo principal para realizar una búsqueda binaria con la llave inicial. Una vez encontrado el inicio, empieza a recorrer ordenadamente el resto del archivo principal y secuencialmente el auxiliar para encontrar el último registro dentro del rango especificado.
+- **Algoritmo de Eliminación:** Se busca al registro a eliminar mediante una búsqueda binaria sobre el archivo principal y sobre una búsqueda lineal sobre el archivo auxiliar. Una vez encontrado, marca al registro como eliminado y no se tiene encuenta para futuras consultas. Este se elimina una vez se llama a la reconstrucción del archivo.
+- **Algoritmo de Inserción Masiva:** Se toma el CSV de entrada y se convierte en el archivo principal ordenado. Esto se logra a partir de cargar los registros en un bloques pequeños de RAM, ordenar el bloque y guardarlo como archivo binario para después hacer la mezcla de los archivos temporales y empaquetarlos en páginas del tamaño expecíficado. Todo esto se hace mediante el algoritmo externo **Two-Phase Multiway Merge Sort** (abreviado External Sort).
+- **Algoritmo de Reconstrucción:** Se agarran los bytes del archivo principal y los bytes del auxiliar y los pega todos juntos en un solo archivo temporal, el cual se pasa al External Sort devolviendo un archivo principal completamente ordenado.
 
-### 2.2. Índice Espacial (R-Tree)
-Estructura de árbol diseñada para indexar información multidimensional, utilizada para procesar los datos de ubicaciones geográficas (*Pickup_Location* / *Dropoff_Location*).
+![Archivo Secuencial](./images/seq_file.png "Archivo Secuencial")
 
-- **Estructura Físico-Lógica:** Nodos agrupados en páginas del disco como Minimum Bounding Rectangles (MBRs).
+### 2.2. Extendible Hashing
+
+### 2.3. B+ Tree
+
+### 2.4. Índice Espacial (R-Tree)
+Estructura de árbol diseñada para indexar información multidimensional. Utilizada para procesar los datos de ubicaciones geográficas (*Pickup_Location* / *Dropoff_Location*).
+
+- **Estructura Físico-Lógica:** Nodos agrupados en páginas del disco como Minimum Bounding Boxes (MBBs).
 - **Algoritmo de Inserción / Construcción:** 
   *[Describe cómo se realiza el particionamiento de nodos y la carga masiva]*
 - **Algoritmo de Búsqueda (Point y Radius/KNN):** Funciona descartando los rectángulos delimitadores que no intersecan con el área de interés establecida.
-- **[Añadir diagrama de estructura espacial aquí]**
+
+![RTree](./images/r_tree.png "RTree")
 
 ---
 
