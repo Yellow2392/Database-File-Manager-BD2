@@ -5,6 +5,7 @@ import json
 from backend.catalog import TableMetadata
 from backend.indexes.sequential import SequentialFile
 from backend.indexes.rtree import RTreeIndex
+from backend.indexes.hash import ExtendibleHashing
 
 from .visualizer import save_spatial_plot
 
@@ -60,7 +61,8 @@ class Executor:
         
         if tech == 'SEQUENTIAL':
             return SequentialFile(meta, key_column, self.data_dir)
-        #TODO: elif tech == 'HASH':
+        if tech == "HASH":                                      
+            return ExtendibleHashing(meta, key_column, self.data_dir)
         #TODO: elif tech == 'BTREE':
         if tech == 'RTREE':
             return RTreeIndex(meta, key_column, self.data_dir)
@@ -88,8 +90,18 @@ class Executor:
         meta.primary_index = primary_index
         self.catalog[table_name] = meta
         
-        print(f"[OK] Tabla {table_name} creada con índice {primary_index.__class__.__name__}.")
+        print(f"[OK] Tabla {table_name} creada con índice  {primary_index.__class__.__name__}.")
         
+
+
+        
+        ####################################################
+        #GUARDAR CATALOGO EN CREACION DE TABLA SINH BULKLOAD
+        ####################################################
+        self._save_system_catalog()
+
+
+
         file_path = ast.get('file')
         delimiter_char = ast.get('delimiter', ',')
 
@@ -109,8 +121,8 @@ class Executor:
     def execute_insert(self, ast):
         table_name = ast['table']
         if table_name not in self.catalog:
-            print(f"[ERROR] La tabla {table_name} no existe.")
-            return
+            raise Exception(f"La tabla {table_name} no existe.")
+            
          
         meta = self.catalog[table_name]
         raw_values = ast['values']
