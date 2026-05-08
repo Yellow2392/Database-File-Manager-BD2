@@ -3,8 +3,8 @@
 **Curso:** Base de Datos 2  
 **Institución:** Universidad de Ingeniería y Tecnología (UTEC)  
 **Integrantes:**
-- Sebastian Romero Pahuara
-- [Nombre Integrante 2]
+- Sebastian Romero Pahuara (sebastianromero07)
+- Jorge Sebastian Tenorio Romero (Yellow2392)
 - [Nombre Integrante 3]
 - [Nombre Integrante 4]
 - [Nombre Integrante 5]
@@ -15,13 +15,13 @@
 El objetivo principal de este proyecto es implementar un sistema gestor de almacenamiento en memoria secundaria simulado completamente desde cero utilizando Python. No se utilizan motores de bases de datos relacionales ni librerías de persistencia externas, garantizando que toda entrada y salida (E/S) de datos esté controlada explícitamente y empaquetada en bloques fijos de disco (paginación).
 
 Para interactuar con el sistema, se ha desarrollado un **Parser y Lexer SQL propio** que procesa sentencias de consulta. A través de este, el sistema evalúa empíricamente la eficiencia de cuatro técnicas de indexación fundamentales:
-*   **Archivo Secuencial (Sequential File):** Para el almacenamiento estructurado de registros contiguos, combinando un archivo principal ordenado y un archivo auxiliar.
-*   **Hash Extensible (Extendible Hashing):** Para la indexación dinámica y búsquedas exactas (*point queries*) en tiempo constante $O(1)$, basado en una tabla de directorios y *buckets* que se dividen según su profundidad global y local.
-*   **Árbol B+ (B+ Tree):** Para soportar búsquedas eficientes por rangos (*range queries*), manteniendo un árbol balanceado con punteros enlazados a nivel de nodos hoja.
-*   **Índice Espacial (R-Tree):** Para la indexación de coordenadas y polígonos, que brinda soporte a consultas espaciales nativas como K-Nearest Neighbors (KNN) y búsquedas geográficas por radio.
+-   **Archivo Secuencial (Sequential File):** Para el almacenamiento estructurado de registros contiguos, combinando un archivo principal ordenado y un archivo auxiliar.
+-   **Hash Extensible (Extendible Hashing):** Para la indexación dinámica y búsquedas exactas (*point queries*) en tiempo constante $O(1)$, basado en una tabla de directorios y *buckets* que se dividen según su profundidad global y local.
+-   **Árbol B+ (B+ Tree):** Para soportar búsquedas eficientes por rangos (*range queries*), manteniendo un árbol balanceado con punteros enlazados a nivel de nodos hoja.
+-   **Índice Espacial (R-Tree):** Para la indexación de coordenadas y polígonos, que brinda soporte a consultas espaciales nativas como K-Nearest Neighbors (KNN) y búsquedas geográficas por radio.
 
 El sistema también cuenta con un simulador de **Gestor de Transacciones Concurrente (Isolation Manager)** manejado por *locks* a nivel de registro para prevenir colisiones asíncronas. El propósito final del informe es contrastar el rendimiento teórico (Notación Big O) frente a los resultados prácticos, midiendo el conteo exacto de accesos a páginas físicas en disco (*disk reads/writes*) y los tiempos reales de ejecución.
----
+
 
 ## 2. Descripción de Técnicas y Algoritmos Implementados
 
@@ -48,6 +48,8 @@ Estructura de indexación dinámica diseñada para realizar búsquedas exactas (
 - **Ventajas:** Crecimiento dinámico sin necesidad de reorganización global frecuente. El directorio crece de forma logarítmica respecto al número de registros.
 - **Algoritmo de Split:** Cuando un bucket se llena, se duplica su tamaño y se rehashean los registros usando $d_{local} + 1$ bits. Si el directorio también necesita crecer, se duplica su tamaño duplicando todos los punteros.
 
+![Extendible Hashing](./images/ext_hash.png "Extendible Hashing")
+
 ### 2.3. B+ Tree
 Árbol balanceado diseñado para soportar búsquedas por rango (*range queries*) y acceso ordenado a los datos de forma eficiente.
 
@@ -63,9 +65,13 @@ Estructura de indexación dinámica diseñada para realizar búsquedas exactas (
 Estructura de árbol diseñada para indexar información multidimensional. Utilizada para procesar los datos de ubicaciones geográficas (*Pickup_Location* / *Dropoff_Location*).
 
 - **Estructura Físico-Lógica:** Nodos agrupados en páginas del disco como Minimum Bounding Boxes (MBBs).
-- **Algoritmo de Inserción / Construcción:** 
-  *[Describe cómo se realiza el particionamiento de nodos y la carga masiva]*
-- **Algoritmo de Búsqueda (Point y Radius/KNN):** Funciona descartando los rectángulos delimitadores que no intersecan con el área de interés establecida.
+- **Algoritmo de Inserción / Construcción:** Para preservar la eficiencia y lograr la menor cantidad de solapamientos en una carga masiva de los datos, se investigó e implementó el algoritmo **Sort-Tile Recursive (STR)** para la carga de los datos en primera instancia. El algoritmo construye el árbol "de abajo hacia arriba" a partir de un conjunto de datos estático, dividiéndolos en tiles rectangulares mediante un ordenamiento multidimensional recursivo. Esto maximiza el factor de llenado de los nodos y minimiza el área de los rectángulos envolventes (MBB), lo que lleva a una reducción drástica del tiempo de respuesta para operaciones de KNN y RangeSearch al reducir el número de ramas a explorar. 
+
+![STR algorithm](./images/str_alg.png "STR algorithm")
+
+- **Algoritmo de Búsqueda de Vecinos Más Cercanos (KNN):** Este algoritmo implementa una estrategia de búsqueda tipo "Best-First" utilizando una cola de prioridad (*Min-Heap*) para encontrar los k objetos más cercanos a un punto de referencia. El proceso comienza en la raíz y prioriza la exploración de los nodos cuyos Rectángulos Envolventes Mínimos (MBR) tienen la menor distancia al objetivo (función *min_dist*). Al extraer elementos de la cola, si se encuentra un nodo interno, se calculan las distancias a sus hijos y se insertan nuevamente en la prioridad; si se llega a un punto real, este se añade directamente al resultado por ser el más cercano disponible en ese momento. Esta técnica optimiza el rendimiento al evitar la inspección de ramas del árbol que están garantizadas a estar más lejos que los candidatos ya encontrados.
+
+- **Algoritmo de Búsqueda por Rango (Query, Radio):** La búsqueda por rango se encarga de localizar todos los elementos que se encuentran dentro de un radio específico alrededor de un punto central, funcionando esencialmente como un filtro de intersección espacial. El algoritmo realiza un recorrido donde se descartan niveles enteros del árbol si su MBR no intersecta el área de búsqueda definida por el radio. Solo cuando un nodo intermedio "toca" el círculo de consulta se exploran sus descendientes, y al llegar a las hojas, se realiza una validación final de la distancia exacta del punto para asegurar que cumple con el criterio de cercanía antes de recuperar su información del almacenamiento.
 
 ![RTree](./images/r_tree.png "RTree")
 
@@ -86,13 +92,42 @@ En base a la teoría y tamaño de página constante establecido (ej. 4 KB):
 ---
 
 ## 4. Descripción del Parser SQL
-Para poder interactuar con las estructuras desde sentencias abstractas, se desarrolló un Parser y Lexer propio:
+Para poder interactuar con las estructuras desde sentencias SQL, se desarrolló un Parser y Lexer propio adaptado a las necesidades específicas del motor, particularmente para soportar consultas espaciales nativas:
 
-- **Lexer (Análisis Léxico):** Construido usando expresiones regulares. Transforma la cadena SQL entrante (`SELECT`, `FROM`, `CREATE`, etc.) en una lista de *tokens*.
-- **Parser (Análisis Sintáctico):** Basado en un procesador top-down. Verifica la secuencia lógica de los tokens asegurando la gramática requerida (soporte para `CREATE TABLE`, `INSERT`, `SELECT`, cláusulas `WHERE`, y keywords geoespaciales como `POINT`, `RADIUS`).
+- **Lexer (Análisis Léxico):** Construido mediante el módulo de expresiones regulares de Python. Actúa como un *autómata finito determinista* (AFD) que escanea la cadena de entrada de izquierda a derecha, tokenizando las palabras clave reservadas (`SELECT`, `CREATE`, `POINT`, `RADIUS`, etc.), identificadores, literales (números y cadenas) y símbolos. Ignora los espacios en blanco y rastrea la posición (línea y columna) para un reporte preciso de errores sintácticos.
+- **Parser (Análisis Sintáctico):** Implementado como un analizador sintáctico descendente predictivo (*Top-Down Recursive Descent Parser*). Verifica la secuencia lógica de los tokens asegurando que cumplan con la gramática libre de contexto definida. Traduce directamente las sentencias válidas a un *Árbol de Sintaxis Abstracta* (AST) en formato de diccionario, el cual mapea las acciones a los métodos internos de las estructuras de datos
 - **Autómatas / Gramática Principal:**  
-  `S -> CREATE_STMT | INSERT_STMT | SELECT_STMT | DROP_STMT`  
-  *(Adjuntar más detalle si se considera oportuno).*
+La sintaxis del lenguaje soportado se rige por la siguiente gramática libre de contexto donde los elementos entre corchetes `[ ]` denotan opcionalidad:
+```
+<S>             ::= <CREATE_STMT> | <SELECT_STMT> | <INSERT_STMT> 
+                  | <DELETE_STMT> | <DROP_STMT>
+
+<CREATE_STMT>   ::= CREATE TABLE <ID> ( <COL_DEF_LIST> ) [ FROM FILE <STRING> [ DELIMITER <STRING> ] ] ;
+<COL_DEF_LIST>  ::= <COL_DEF> | <COL_DEF> , <COL_DEF_LIST>
+<COL_DEF>       ::= <ID> <TYPE> [ INDEX <ID> ]
+<TYPE>          ::= INT | FLOAT | VARCHAR | POINT | BOOLEAN | DATE
+
+<SELECT_STMT>   ::= SELECT * FROM <ID> WHERE <ID> <CONDITION> ;
+<CONDITION>     ::= = <VALUE>
+                  | BETWEEN <NUMBER> AND <NUMBER>
+                  | IN ( POINT ( <NUMBER> , <NUMBER> ) , <SPATIAL_PARAM> )
+<SPATIAL_PARAM> ::= RADIUS <NUMBER> | K <NUMBER>
+
+<INSERT_STMT>   ::= INSERT INTO <ID> VALUES ( <VALUE_LIST> ) ;
+<VALUE_LIST>    ::= <VALUE> | <VALUE> , <VALUE_LIST>
+
+<DELETE_STMT>   ::= DELETE FROM <ID> WHERE <ID> = <VALUE> ;
+
+<DROP_STMT>     ::= DROP TABLE <ID> ;
+
+<VALUE>         ::= <NUMBER> | <STRING>
+```
+
+- **Observaciones:** En el presente parser se hacen una serie de simplificaciones respecto a cómo funcionan los Parser SQL realmente. Entre estos cambios están:
+- `VARCHAR` denota un tipo de dato String de que asume una **longitud fija** de 50 bytes. No soporta la modificación de la longitud `VARCHAR (<NUMBER>)`.
+- `POINT` es un tipo de dato compuesto de 2 datos de tipo `float`. Se simplificó la forma de llegar a este tipo de dato mediante instanciar el tipo `POINT` en la declaración de creación de la tabla (siendo que al declarar este tipo al leer un archivo CSV en la carga de datos, asume que la columna sobre la que se aplica y la siguiente serán las coordenadas espaciales `x,y` compuestas).
+- El parser no permite en esta versión un filtro de selección de columnas al realizar una operación de `SELECT`. Siendo obligatorio usar `*` seguido de la palabra reservada.
+- El tipo de dato `DATE` se comporta como un `VARCHAR` de longitud máxima de 19 bytes (siguiendo el formato `YYYY-MM-DD HH:mm:ss`). Este cambio dista del tipo de manejo de los motores de base de datos reales, siendo que internamente estos manejan el tamaño del tipo `DATE` mediante 4 bytes (tratándolo de manera parecida a un `INT`).
 
 ---
 
@@ -151,3 +186,8 @@ docker compose exec backend sh
 ```
 
 Eso es todo: con estos comandos la aplicación quedará accesible y los datos persistirán en las rutas montadas por volumen.
+
+## 8. Referencias
+
+- [text](https://ia800709.us.archive.org/13/items/nasa_techdoc_19970016975/19970016975.pdf)
+- 
