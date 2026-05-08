@@ -6,6 +6,9 @@ from backend.catalog import TableMetadata
 from backend.indexes.sequential import SequentialFile
 from backend.indexes.rtree import RTreeIndex
 from backend.indexes.hash import ExtendibleHashing
+from backend.indexes.heap import HeapFile
+
+from backend.external.external_hashing import ExternalHashing
 
 from .visualizer import save_spatial_plot
 
@@ -57,15 +60,17 @@ class Executor:
             return self.execute_drop(ast)
     
     def _get_index_instance(self, tech_name, meta, key_column):
-        tech = tech_name.upper() if tech_name else 'SEQUENTIAL'
+        tech = tech_name.upper() if tech_name else 'NONE'
         
         if tech == 'SEQUENTIAL':
             return SequentialFile(meta, key_column, self.data_dir)
-        if tech == "HASH":                                      
+        elif tech == "HASH":                                      
             return ExtendibleHashing(meta, key_column, self.data_dir)
         #TODO: elif tech == 'BTREE':
-        if tech == 'RTREE':
+        elif tech == 'RTREE':
             return RTreeIndex(meta, key_column, self.data_dir)
+        elif tech == 'NONE':
+            return HeapFile(meta, key_column, self.data_dir)
         else:
             raise ValueError(f"Técnica no soportada: {tech}")
 
@@ -238,6 +243,38 @@ class Executor:
                         # Compatibilidad con versiones anteriores si solo retorna filepath
                         img_path = result
                         plot_base64 = None
+
+        elif cond['action'] == 'groupby':
+            group_col = cond['column']
+            
+            group_key_index = 0
+            for i, col in enumerate(meta.columns): # en qué posición está la columna que debo agrupar?
+                if col['name'] == group_col:
+                    group_key_index = i
+                    break
+                    
+            hasher = ExternalHashing(
+                recordformat=meta.struct_format,
+                pagesize=self.PAGE_SIZE if hasattr(self, 'PAGE_SIZE') else 4096,
+                buffersize=2 * 1024 * 1024 # 2MB para RAM
+            )
+            
+            #! Manda al archivo físico (Por ahora solo lo soportan Sequential File y Heap File)
+            target_file = getattr(index, 'main_file', None) # Sequential
+            if not target_file:
+                target_file = getattr(index, 'bin_file_path', None) # Heap
+                if not target_file:
+                    raise Exception("El índice actual no soporta agrupación directa.")
+                
+            print(f"Ejecutando External Hashing GROUP BY en columna: {group_col}...")
+            stats = hasher.externalhashgroupby(target_file, group_key_index)
+            
+            columns = [group_col, "COUNT"] # Definimos las cabeceras de la tabla resultante
+            
+            for key, count in stats["result"].items():
+                rows.append((key, count)) 
+                
+            total_reads = stats["pagesread"]
 
         return {
             "columns": columns,

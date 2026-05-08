@@ -135,6 +135,22 @@ class DBMSSqlParser:
         self.match('FROM')
         
         table_name = self.match('ID').value
+
+        op_token = self.current_token()
+        if op_token and op_token.type == 'GROUP':
+            self.match('GROUP')
+            self.match('BY')
+            group_column = self.match('ID').value
+            self.match('SYMBOL', ';')
+            
+            return {
+                "statement": "SELECT",
+                "table": table_name,
+                "condition": {
+                    "action": "groupby",
+                    "column": group_column
+                }
+            }
         
         self.match('WHERE')
         column_name = self.match('ID').value
