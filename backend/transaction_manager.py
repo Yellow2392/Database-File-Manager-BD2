@@ -41,6 +41,8 @@ class TransactionManager:
             keys.append(ast['values'][0])
         elif stmt == 'DELETE':
             keys.append(ast['condition']['key'])
+        elif stmt == 'UPDATE':
+            keys.append(ast['condition']['key'])
         # Los SELECT puros usualmente usan shared locks, pero para esta simplificación podemos dejarlos pasar sin bloqueo exclusivo
         
         return keys
