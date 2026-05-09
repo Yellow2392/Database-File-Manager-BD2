@@ -50,7 +50,7 @@ Estructura de indexación dinámica diseñada para realizar búsquedas exactas (
 
 ![Extendible Hashing](./images/ext_hash.png "Extendible Hashing")
 
-### 2.3. B+ Tree
+### 2.3. Unclustered B+ Tree
 Árbol balanceado diseñado para soportar búsquedas por rango (*range queries*) y acceso ordenado a los datos de forma eficiente.
 
 - **Estructura Físico-Lógica:** Se implementa como un árbol balanceado donde todos los nodos hoja están al mismo nivel y conectados entre sí mediante punteros (linked list). Los nodos internos actúan como índices de navegación, mientras que las hojas contienen los registros reales o punteros a ellos.
@@ -60,6 +60,8 @@ Estructura de indexación dinámica diseñada para realizar búsquedas exactas (
 - **Algoritmo de Eliminación:** Se localiza el registro mediante búsqueda. Se elimina de la hoja. Si la hoja queda por debajo del mínimo número de entradas permitidas (*underflow*), se fusiona con una hoja hermana o se redistribuyen las entradas. Este proceso puede propagarse hacia arriba hasta la raíz.
 - **Orden del Árbol:** El número de entradas por nodo se determina basándose en el tamaño de página (PAGE_SIZE) y el tamaño de las claves, permitiendo múltiples entradas por página para minimizar accesos a disco.
 - **Balanceo Garantizado:** Todos los nodos hoja están al mismo nivel, garantizando que cualquier búsqueda realiza el mismo número de accesos a disco en el peor caso.
+
+![B+ Tree](./images/btree.png "B+ Tree")
 
 ### 2.4. Índice Espacial (R-Tree)
 Estructura de árbol diseñada para indexar información multidimensional. Utilizada para procesar los datos de ubicaciones geográficas (*Pickup_Location* / *Dropoff_Location*).
@@ -74,6 +76,20 @@ Estructura de árbol diseñada para indexar información multidimensional. Utili
 - **Algoritmo de Búsqueda por Rango (Query, Radio):** La búsqueda por rango se encarga de localizar todos los elementos que se encuentran dentro de un radio específico alrededor de un punto central, funcionando esencialmente como un filtro de intersección espacial. El algoritmo realiza un recorrido donde se descartan niveles enteros del árbol si su MBR no intersecta el área de búsqueda definida por el radio. Solo cuando un nodo intermedio "toca" el círculo de consulta se exploran sus descendientes, y al llegar a las hojas, se realiza una validación final de la distancia exacta del punto para asegurar que cumple con el criterio de cercanía antes de recuperar su información del almacenamiento.
 
 ![RTree](./images/r_tree.png "RTree")
+
+### 2.5 Algoritmos Externos
+
+#### 2.5.1 Two-Phase Multiway Merge Sort
+
+Como se mencionó previamente, este algoritmo soluciona el problema de ordenar grandes volúmenes de datos con RAM limitada mediante una primera fase de generación de "runs" ordenados internamente y una segunda fase de mezcla (merging) que utiliza un heap de mínimos para producir la relación final. Este algoritmo fue principalmente usado en la carga masiva de datos para el Sequential File (debido a que la naturaleza de la tarea involucra meter grandes volúmenes de datos dentro de un archivo ordenado) y para la operación añadida `ORDER BY`, el cual resulta sumamente útil ante búsquedas por rango con un gran volumen de retorno.
+
+#### 2.5.2 External Hashing
+
+Este método se implementó para procesar la nueva operación `GROUP BY` particionando los datos en disco mediante una función hash para luego cargar cada partición individualmente en memoria y construir tablas hash que permitan realizar la agrupación o unión de tuplas de manera eficiente. 
+
+#### 2.5.3 Heap File
+
+Este método se implementó en dos formas, siendo una versión adaptada para el manejo propio del *B+ Tree* y otra versión adaptada para el soporte de operaciones sobre datasets no indexados, funcionando como un Baseline que funciona como un "índice" *Append-only*.
 
 ---
 
@@ -107,7 +123,9 @@ La sintaxis del lenguaje soportado se rige por la siguiente gramática libre de 
 <COL_DEF>       ::= <ID> <TYPE> [ INDEX <ID> ]
 <TYPE>          ::= INT | FLOAT | VARCHAR | POINT | BOOLEAN | DATE
 
-<SELECT_STMT>   ::= SELECT * FROM <ID> WHERE <ID> <CONDITION> ;
+<SELECT_STMT>   ::= SELECT * FROM <ID> <SELECT_OPTS> ;
+<SELECT_OPTS>   ::= GROUP BY <ID>
+                  | WHERE <ID> <CONDITION> [ ORDER BY <ID> ]
 <CONDITION>     ::= = <VALUE>
                   | BETWEEN <NUMBER> AND <NUMBER>
                   | IN ( POINT ( <NUMBER> , <NUMBER> ) , <SPATIAL_PARAM> )
@@ -132,7 +150,7 @@ La sintaxis del lenguaje soportado se rige por la siguiente gramática libre de 
 ---
 
 ## 5. Resultados Experimentales y Discusión
-Para los experimentos se usó el dataset público de *Yellow Tripdata de Nueva York (2016)* con N = 1 000, 10 000 y 100 000.
+Para los experimentos se usó el dataset público de [*Yellow Tripdata de Nueva York (2016)*](https://www.kaggle.com/datasets/elemento/nyc-yellow-taxi-trip-data) con N = 1 000, 10 000 y 100 000.
 
 ### Métricas Obtenidas
 *(Insertar una tabla con los resultados empíricos)*
