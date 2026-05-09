@@ -9,6 +9,7 @@ from backend.indexes.hash import ExtendibleHashing
 from backend.indexes.heap import HeapFile
 
 from backend.external.external_hashing import ExternalHashing
+from backend.indexes.bplusTree import BPlusTree
 
 from .visualizer import save_spatial_plot
 
@@ -66,8 +67,9 @@ class Executor:
             return SequentialFile(meta, key_column, self.data_dir)
         elif tech == "HASH":                                      
             return ExtendibleHashing(meta, key_column, self.data_dir)
-        #TODO: elif tech == 'BTREE':
-        elif tech == 'RTREE':
+        if tech == 'BTREE':
+            return BPlusTree(meta, key_column, self.data_dir)
+        if tech == 'RTREE':
             return RTreeIndex(meta, key_column, self.data_dir)
         elif tech == 'NONE':
             return HeapFile(meta, key_column, self.data_dir)
@@ -110,12 +112,22 @@ class Executor:
         file_path = ast.get('file')
         delimiter_char = ast.get('delimiter', ',')
 
+        total_reads = 0
+        total_writes = 0
+
         if file_path:
             full_path = os.path.join("dataset", file_path)
             if os.path.exists(full_path):
                 print(f"Delegando carga masiva a {primary_index.__class__.__name__}...")
                 
+                # Reiniciar contadores antes del bulk_load
+                primary_index.disk_reads = 0
+                primary_index.disk_writes = 0
+                
                 primary_index.bulk_load(full_path, delimiter = delimiter_char)
+                
+                total_reads = primary_index.disk_reads
+                total_writes = primary_index.disk_writes
                 
                 print(f"[OK] Carga masiva completada.")
 
@@ -123,11 +135,17 @@ class Executor:
             else:
                 print(f"[ERROR] Archivo {full_path} no encontrado.")
 
+        return {
+            "message": f"Tabla {table_name} creada correctamente.",
+            "diskReads": total_reads,
+            "diskWrites": total_writes
+        }
+        
     def execute_insert(self, ast):
         table_name = ast['table']
         if table_name not in self.catalog:
-            raise Exception(f"La tabla {table_name} no existe.")
-            
+            print(f"[ERROR] La tabla {table_name} no existe.")
+            return
          
         meta = self.catalog[table_name]
         raw_values = ast['values']
@@ -156,9 +174,21 @@ class Executor:
         print(f"[OK] Registro insertado exitosamente.")
         print(f"-> Accesos a disco: {index.disk_reads} reads, {index.disk_writes} writes.")
 
+        return {
+            "message": "Registro insertado exitosamente.",
+            "diskReads": index.disk_reads,
+            "diskWrites": index.disk_writes
+        }
+        
+        
     def execute_delete(self, ast):
         table_name = ast['table']
-        if table_name not in self.catalog: return
+        if table_name not in self.catalog: 
+            return {
+                "message": f"La tabla {table_name} no existe.",
+                "diskReads": 0,
+                "diskWrites": 0
+            }
         
         key_to_delete = ast['condition']['key']
         index = self.catalog[table_name].primary_index
@@ -166,11 +196,20 @@ class Executor:
         index.disk_reads, index.disk_writes = 0, 0 
         
         success = index.remove(key_to_delete)
+        
         if success:
-            print(f"[OK] Registro eliminado. Reads: {index.disk_reads}, Writes: {index.disk_writes}")
+            msg = "[OK] Registro eliminado."
+            print(f"{msg} Reads: {index.disk_reads}, Writes: {index.disk_writes}")
         else:
-            print(f"[INFO] Registro con llave {key_to_delete} no encontrado.")
+            msg = f"[INFO] Registro con llave {key_to_delete} no encontrado."
+            print(msg)
 
+        return {
+            "message": msg,
+            "diskReads": index.disk_reads,
+            "diskWrites": index.disk_writes
+        }
+        
     def execute_select(self, ast):
         table_name = ast['table']
         if table_name not in self.catalog: 
