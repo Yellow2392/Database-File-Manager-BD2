@@ -484,14 +484,16 @@ class BPlusTree(BaseIndex):
 
         return results
     
-    def search(self, key):
-        offsets = self.search_all(key)
+    def search(self, key_value):
+        offsets = self.search_all(key_value)
 
         if not offsets:
-            return []
+            return None
 
         records = self.heap.read_many(offsets)
-        return [self.table_meta.clean_tuple(r) for r in records]
+        if not records:
+            return None
+        return records[0]
 
     def range_search_1(self, begin_key, end_key):
         if begin_key is None or end_key is None:
@@ -532,7 +534,7 @@ class BPlusTree(BaseIndex):
             return []
 
         records = self.heap.read_many(offsets)
-        return [self.table_meta.clean_tuple(r) for r in records]
+        return records
 
 
     def insert(self, key, pointer):
