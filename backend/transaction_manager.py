@@ -9,6 +9,9 @@ class TransactionManager:
         self._manager_lock = threading.Lock()
         self.log = []
 
+        self.lock_owners = {}   # key -> tx_id (dueño actual)
+        self.waiting_txs = set() # conjunto de tx_ids que están bloqueados esperando
+
     def _log(self, tx_id, msg, status):
         timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
         linea = f"[{timestamp}] [TX-{tx_id}] {msg.ljust(35)} | {status}"
@@ -20,17 +23,40 @@ class TransactionManager:
         with self._manager_lock:
             if key not in self.record_locks:
                 self.record_locks[key] = threading.Lock()
+                self.lock_owners[key] = None
         
         lock = self.record_locks[key]
+        
         if not lock.acquire(blocking=False):
-            self._log(tx_id, f"Conflicto en ID {key}", "CONFLICT (Esperando...)")
+            
+            with self._manager_lock:
+                owner_tx = self.lock_owners.get(key)
+                
+                if owner_tx in self.waiting_txs:
+                    self._log(tx_id, f"Conflicto en ID {key}: TX-{owner_tx} ya está en espera.", "ABORTANDO (Espera-Cautelosa)")
+                    raise Exception(f"Prevención Espera-Cautelosa: El dueño TX-{owner_tx} está bloqueado.")
+                
+                self.waiting_txs.add(tx_id)
+                self._log(tx_id, f"Conflicto en ID {key}", "CONFLICT (Esperando a dueño...)")
+            
             lock.acquire()
+            
+            with self._manager_lock:
+                self.waiting_txs.discard(tx_id)
+
+        with self._manager_lock:
+            self.lock_owners[key] = tx_id
+            
         self._log(tx_id, f"Lock adquirido en ID {key}", "LOCKED")
 
     def _release_lock(self, tx_id, key):
-        if key in self.record_locks:
-            self.record_locks[key].release()
-            self._log(tx_id, f"Lock liberado en ID {key}", "RELEASED")
+        with self._manager_lock:
+            if key in self.record_locks:
+                if self.lock_owners.get(key) == tx_id:
+                    self.lock_owners[key] = None
+                self.record_locks[key].release()
+        
+        self._log(tx_id, f"Lock liberado en ID {key}", "RELEASED")
 
     def _extract_keys_from_ast(self, ast):  # Espía al AST para saber qué registros se van a modificar
         keys = []

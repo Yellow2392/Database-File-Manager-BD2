@@ -92,6 +92,8 @@ class Executor:
         
         print(f"[OK] Tabla {table_name} creada con índice {primary_index.__class__.__name__}.")
         
+        self._save_system_catalog()
+
         file_path = ast.get('file')
         delimiter_char = ast.get('delimiter', ',')
 
@@ -141,7 +143,7 @@ class Executor:
         print(f"[OK] Registro insertado exitosamente.")
         print(f"-> Accesos a disco: {index.disk_reads} reads, {index.disk_writes} writes.")
 
-        def execute_update(self, ast):
+    def execute_update(self, ast):
             table_name = ast['table']
             if table_name not in self.catalog:
                 print(f"[ERROR] La tabla {table_name} no existe.")
