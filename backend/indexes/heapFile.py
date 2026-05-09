@@ -208,7 +208,54 @@ class HeapFile:
                     record = struct.unpack(self.table_meta.struct_format, payload)
                     results.append(record)
         return results
+    
 
+    def bulk_insert(self, records, reset=False):
+
+        # reiniciar heap solo si se pide
+        if reset:
+            if os.path.exists(self.filepath):
+                os.remove(self.filepath)
+            with open(self.filepath, 'wb') as f:
+                # free_head = -1
+                # total_pages = 0
+                f.write(struct.pack(self.FILE_HEADER_FORMAT,-1,0))
+
+        # abrir existente
+        with open(self.filepath, 'r+b') as f:
+            # leer header actual
+            f.seek(0)
+            free_head, total_pages = struct.unpack(
+                self.FILE_HEADER_FORMAT,
+                f.read(self.FILE_HEADER_SIZE)
+            )
+            current_page = total_pages
+            page_records = []
+            offsets = []
+            for record_tuple in records:
+                page_records.append(record_tuple)
+                # página llena
+                if len(page_records) >= self.BLOCK_FACTOR:
+                    self._write_page( f,current_page, page_records)
+
+                    # offsets físicos
+                    for slot in range(len(page_records)):
+                        offsets.append(self._page_offset(current_page) + self.PAGE_HEADER_SIZE+ slot * self.RECORD_SIZE)
+                    current_page += 1
+                    page_records.clear()
+            # última página parcial
+            if page_records:
+                self._write_page(f,current_page,page_records)
+
+                for slot in range(len(page_records)):
+                    offsets.append(self._page_offset(current_page) + self.PAGE_HEADER_SIZE+ slot * self.RECORD_SIZE)
+                current_page += 1
+
+            # actualizar header final
+            f.seek(0)
+            f.write( struct.pack(self.FILE_HEADER_FORMAT, -1, current_page ))
+        return offsets
+    
     def _write_page(self, f, page_id, records):
 
         f.seek(self._page_offset(page_id))
