@@ -64,7 +64,7 @@ class Executor:
         
         if tech == 'SEQUENTIAL':
             return SequentialFile(meta, key_column, self.data_dir)
-        if tech == "HASH":                                      
+        if tech == "HASH":
             return ExtendibleHashing(meta, key_column, self.data_dir)
         if tech == 'BTREE':
             return BPlusTree(meta, key_column, self.data_dir)
