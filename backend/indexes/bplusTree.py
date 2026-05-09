@@ -145,3 +145,623 @@ class BPlusNode:
                 node.keys.append(key)
                 node.pointers.append(ptr)
         return node
+    
+
+class BPlusTree(BaseIndex):
+    HEADER_FORMAT = 'ii'  # root_ptr, total_nodes
+    HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
+
+    def __init__(self, table_meta, key_column, data_dir="backend/data"):
+        super().__init__(table_meta, key_column, data_dir)
+
+        # tipo de clave desde metadata
+        key_type = None
+        for col in table_meta.columns:
+            if col["name"] == key_column:
+                key_type = col["type"].upper()
+                break
+
+        if key_type is None:
+            raise ValueError("Key column not found")
+        
+        self.filename = os.path.join(self.data_dir, f"{self.table_meta.name}_{self.key_column}_bplustree.dat")
+
+        self.key_fmt = TYPE_MAP[key_type]['fmt']
+        self.key_size = TYPE_MAP[key_type]['size']
+        self.key_type = key_type
+
+        # ORDER basado en PAGE_SIZE
+        self.ORDER = (self.PAGE_SIZE - BPlusNode.HEADER_SIZE - BPlusNode.INT_SIZE) // (
+            self.key_size + BPlusNode.INT_SIZE
+        )
+
+        if self.ORDER < 2:
+            raise ValueError("ORDER too small for given PAGE_SIZE and key type")
+        
+        self.heap_path = os.path.join(self.data_dir,f"{self.table_meta.name}.heap")
+        self.heap = HeapFile(
+            table_meta=self.table_meta,
+            filepath=self.heap_path,
+            page_size=self.PAGE_SIZE
+        )
+
+        # crear archivo si no existe
+        if not os.path.exists(self.filename):
+            with open(self.filename, 'wb') as f:
+                # header inicial
+                root_ptr = self.HEADER_SIZE
+                total_nodes = 1
+
+                f.write(struct.pack(self.HEADER_FORMAT, root_ptr, total_nodes))
+
+                # crear nodo raíz vacío
+                root = BPlusNode(
+                    self.key_fmt,
+                    self.key_size,
+                    self.ORDER,
+                    self.PAGE_SIZE,
+                    node_type=1,  # hoja
+                    is_root=1
+                )
+
+                root.keys = []
+                root.pointers = []
+                root.num_keys = 0
+
+                f.write(root.pack())
+
+    # header del btreeeee
+    def _read_header(self):
+        with open(self.filename, 'rb') as f:
+            f.seek(0)
+            data = f.read(self.HEADER_SIZE)
+            return struct.unpack(self.HEADER_FORMAT, data)
+
+
+    def _write_header(self, root_ptr, total_nodes):
+        with open(self.filename, 'r+b') as f:
+            f.seek(0)
+            f.write(struct.pack(self.HEADER_FORMAT, root_ptr, total_nodes))
+
+    # nodo del btreeeee
+    def _read_node(self, offset):
+        with open(self.filename, 'rb') as f:
+            f.seek(offset)
+
+            data = f.read(self.PAGE_SIZE)
+
+        self.disk_reads += 1
+        node = BPlusNode.unpack(
+            data,
+            self.key_fmt,
+            self.key_size,
+            self.ORDER,
+            self.PAGE_SIZE
+        )
+
+        # Post-process VARCHAR keys to decode from bytes to str
+        if self.key_type == 'VARCHAR':
+            node.keys = [key.decode('utf-8').rstrip('\x00') for key in node.keys]
+
+        return node
+    
+    def _write_node(self, node, offset):
+
+        # guardar originales
+        original_keys = node.keys
+
+        # usar copia normalizada SOLO para pack
+        node.keys = [
+            self._normalize_key_value(k)
+            for k in original_keys
+        ]
+
+        with open(self.filename, 'r+b') as f:
+
+            f.seek(0, 2)
+            current_size = f.tell()
+
+            if offset + self.PAGE_SIZE > current_size:
+                f.write(
+                    b'\x00' * (
+                        offset + self.PAGE_SIZE - current_size
+                    )
+                )
+
+            f.seek(offset)
+            f.write(node.pack())
+
+        # restaurar originales
+        node.keys = original_keys
+
+        self.disk_writes += 1
+        
+    #comparar claves
+    def _is_numeric(self, value):
+        return isinstance(value, (int, float)) or (
+            isinstance(value, str) and re.fullmatch(r"-?\d+(?:\.\d+)?", value.strip())
+        )
+
+    def _normalize_key_value(self, key):
+        if key is None:
+            return None
+
+        if self.key_type == 'FLOAT':
+            try:
+                value = float(key)
+                normalized, = struct.unpack('f', struct.pack('f', value))
+                return normalized
+            except Exception:
+                return key
+
+        if self.key_type == 'VARCHAR':
+            if isinstance(key, bytes):
+                return key
+            try:
+                s = str(key)[:50]  # Truncate to 50 chars
+                padded = s.encode('ascii', 'ignore').ljust(50, b'\x00')
+                return padded
+            except Exception:
+                return key
+
+        return key
+
+    def _compare_keys(self, a, b):
+        """
+        Returns:
+            -1 if a < b
+            0 if a == b
+            1 if a > b
+        """
+        # None
+        if a is None and b is None:
+            return 0
+        if a is None:
+            return -1
+        if b is None:
+            return 1
+
+        if self.key_type == 'FLOAT':
+            a = self._normalize_key_value(a)
+            b = self._normalize_key_value(b)
+
+        if self.key_type == 'VARCHAR':
+            if isinstance(a, bytes):
+                a = a.decode('ascii').rstrip('\x00')
+            if isinstance(b, bytes):
+                b = b.decode('ascii').rstrip('\x00')
+            a = str(a).rstrip('\x00')
+            b = str(b).rstrip('\x00')
+
+        # numeric
+        if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+            return (a > b) - (a < b)
+
+        # Numeric como strings
+        try:
+            if self._is_numeric(a) and self._is_numeric(b):
+                fa = float(str(a))
+                fb = float(str(b))
+                if self.key_type == 'FLOAT':
+                    fa, = struct.unpack('f', struct.pack('f', fa))
+                    fb, = struct.unpack('f', struct.pack('f', fb))
+                return (fa > fb) - (fa < fb)
+        except Exception:
+            pass
+
+        # string comparison
+        sa = str(a)
+        sb = str(b)
+
+        if sa == sb:
+            return 0
+
+        return 1 if sa > sb else -1
+    
+
+    #busquda binaria
+    def _binary_search_internal(self, node, key): # Devuelve el índice del puntero por donde bajar
+        left, right = 0, node.num_keys - 1
+        result = node.num_keys
+
+        while left <= right:
+            mid = (left + right) // 2
+
+            if self._compare_keys(node.keys[mid], key) <= 0:
+                left = mid + 1
+            else:
+                result = mid
+                right = mid - 1
+
+        # asegurar índice válido de punteros
+        return min(result, len(node.pointers) - 1)
+    
+    def _binary_search_leaf(self, node, key):
+
+        left, right = 0, node.num_keys - 1
+        result = -1
+
+        while left <= right:
+
+            mid = (left + right) // 2
+
+            cmp_value = self._compare_keys(node.keys[mid], key)
+
+            if cmp_value == 0:
+                result = mid
+                right = mid - 1
+
+            elif cmp_value > 0:
+                right = mid - 1
+
+            else:
+                left = mid + 1
+
+        return result
+
+    def _min_keys_leaf(self):
+        return (self.ORDER + 1) // 2
+
+    def _min_keys_internal(self):
+        return (self.ORDER + 2) // 2 - 1
+
+    def _find_first_leaf(self, key): #devuelve nodo hoja donde podria esta la primera key y el indice
+        root_ptr, _ = self._read_header()
+        node = self._read_node(root_ptr)
+
+        while node.node_type == 0:
+            left, right = 0, node.num_keys - 1
+            result = node.num_keys
+
+            while left <= right:
+                mid = (left + right) // 2
+
+                if self._compare_keys(node.keys[mid], key) < 0:
+                    left = mid + 1
+                else:
+                    result = mid
+                    right = mid - 1
+
+            idx = min(result, len(node.pointers) - 1)
+            node = self._read_node(node.pointers[idx])
+
+        # calcular índice dentro de la hoja
+        left, right = 0, node.num_keys - 1
+        result = node.num_keys
+
+        while left <= right:
+            mid = (left + right) // 2
+
+            if self._compare_keys(node.keys[mid], key) < 0:
+                left = mid + 1
+            else:
+                result = mid
+                right = mid - 1
+
+        return node, result
+    
+    def search_one(self, key):
+
+        results = self.search_all(key)
+
+        if not results:
+            return None
+
+        return results[0]
+
+    def search_all(self, key):
+        node, idx = self._find_first_leaf(key)
+
+        results = []
+
+        while True:
+            stop = False
+
+            #empezar desde idx soloo en la primera hoja
+            start = idx if node else 0
+
+            for i in range(start, node.num_keys):
+                k = node.keys[i]
+                p = node.pointers[i]
+
+                res = self._compare_keys(k, key)
+
+                if res == 0:
+                    results.append(p)
+
+                elif res > 0:
+                    stop = True
+                    break
+
+            if stop:
+                break
+
+            if node.next_leaf == -1:
+                break
+
+            node = self._read_node(node.next_leaf)
+            idx = 0  # siguientes hojas empiezan desde 0
+
+        return results
+    
+    def search(self, key):
+        offsets = self.search_all(key)
+
+        if not offsets:
+            return []
+
+        records = self.heap.read_many(offsets)
+        return [self.table_meta.clean_tuple(r) for r in records]
+
+    def range_search_1(self, begin_key, end_key):
+        if begin_key is None or end_key is None:
+            return []
+
+        if self._compare_keys(begin_key, end_key) > 0:
+            begin_key, end_key = end_key, begin_key
+
+        node, idx = self._find_first_leaf(begin_key)
+
+        results = []
+
+        while True:
+            #idx solo en la primera hoja
+            start = idx if node else 0
+
+            for i in range(start, node.num_keys):
+                k = node.keys[i]
+                p = node.pointers[i]
+
+                if self._compare_keys(k, end_key) > 0:
+                    return results
+
+                results.append(p)
+
+            if node.next_leaf == -1:
+                break
+
+            node = self._read_node(node.next_leaf)
+            idx = 0  #siguientes hojas empiezan desde 0
+
+        return results
+    
+    def rangeSearch(self, begin_key, end_key):
+        offsets = self.range_search_1(begin_key, end_key)
+
+        if not offsets:
+            return []
+
+        records = self.heap.read_many(offsets)
+        return [self.table_meta.clean_tuple(r) for r in records]
+
+
+    def insert(self, key, pointer):
+        root_ptr, _ = self._read_header()
+
+        result = self._insert_recursive(key, pointer, root_ptr)
+
+        # si hubo split que llegó a la raíz
+        if result is not None:
+            promoted_key, new_child_ptr = result
+
+            old_root_ptr = root_ptr
+
+            #nueva raiz
+            new_root = BPlusNode(
+                self.key_fmt,
+                self.key_size,
+                self.ORDER,
+                self.PAGE_SIZE,
+                node_type=0,
+                is_root=1
+            )
+
+            new_root.keys = [promoted_key]
+            new_root.pointers = [old_root_ptr, new_child_ptr]
+            new_root.num_keys = 1
+            new_root.parent_ptr = -1
+
+            #quitando flag de root al antiguo
+            old_root = self._read_node(old_root_ptr)
+            old_root.is_root = 0
+            self._write_node(old_root, old_root_ptr)
+
+            #ofset del nuevo nodo
+            _, total_nodes = self._read_header()
+            new_root_ptr = self.HEADER_SIZE + total_nodes * self.PAGE_SIZE
+
+            self._write_node(new_root, new_root_ptr)
+
+            # old root ahora apunta a nueva root
+            old_root.parent_ptr = new_root_ptr
+            self._write_node(old_root, old_root_ptr)
+
+            # nuevo hijo también apunta a nueva root
+            new_child = self._read_node(new_child_ptr)
+
+            new_child.parent_ptr = new_root_ptr
+
+            self._write_node(new_child, new_child_ptr)
+
+            # actualizar header
+            self._write_header(
+                root_ptr=new_root_ptr,
+                total_nodes=total_nodes + 1
+            )
+
+    def add(self, record_tuple, is_bulk = False):
+        offset = self.heap.insert(record_tuple)
+
+        key_idx = None
+
+        for i, col in enumerate(self.table_meta.columns):
+            if col["name"] == self.key_column:
+                key_idx = i
+                break
+
+        key = record_tuple[key_idx]
+        self.insert(key, offset)
+
+        return offset
+
+    def _insert_in_leaf(self, node, key, pointer):
+        key = self._normalize_key_value(key)
+
+        left, right = 0, node.num_keys
+
+        while left < right:
+            mid = (left + right) // 2
+
+            if self._compare_keys(node.keys[mid], key) <= 0:
+                left = mid + 1
+            else:
+                right = mid
+
+        idx = left
+
+        node.keys.insert(idx, key)
+        node.pointers.insert(idx, pointer)
+        node.num_keys += 1
+
+    def _insert_in_internal(self, node, key, pointer):
+        key = self._normalize_key_value(key)
+
+        left, right = 0, node.num_keys
+
+        while left < right:
+            mid = (left + right) // 2
+
+            if self._compare_keys(node.keys[mid], key) <= 0:
+                left = mid + 1
+            else:
+                right = mid
+
+        idx = left
+
+        node.keys.insert(idx, key)
+        node.pointers.insert(idx + 1, pointer)
+        node.num_keys += 1
+    
+    def _insert_recursive(self, key, pointer, node_ptr):
+        node = self._read_node(node_ptr)
+
+        # hoja
+        if node.node_type == 1:
+            self._insert_in_leaf(node, key, pointer)
+            self._write_node(node, node_ptr)
+
+            if node.num_keys > self.ORDER:
+                return self._split_leaf(node, node_ptr)
+
+            return None
+
+        #interno
+        else:
+            child_idx = self._binary_search_internal(node, key)
+            child_ptr = node.pointers[child_idx]
+
+            result = self._insert_recursive(key, pointer, child_ptr)
+
+            #si el hijo hizo split
+            if result is not None:
+                promoted_key, new_child_ptr = result
+
+                self._insert_in_internal(node, promoted_key, new_child_ptr)
+
+                if node.num_keys > self.ORDER:
+                    self._write_node(node, node_ptr)
+                    return self._split_internal(node, node_ptr)
+                else:
+                    self._write_node(node, node_ptr)
+
+            return None
+
+    def _split_leaf(self, node, node_ptr):
+        mid = node.num_keys // 2
+
+        new_node = BPlusNode(
+            self.key_fmt,
+            self.key_size,
+            self.ORDER,
+            self.PAGE_SIZE,
+            node_type=1,
+            is_root=0
+        )
+
+        new_node.parent_ptr = node.parent_ptr
+
+        # reservar espacio en disco
+        root_ptr, total_nodes = self._read_header()
+        new_node_ptr = self.HEADER_SIZE + total_nodes * self.PAGE_SIZE
+
+        # dividir contenido
+        new_node.keys = node.keys[mid:]
+        new_node.pointers = node.pointers[mid:]
+        new_node.num_keys = len(new_node.keys)
+        new_node.next_leaf = node.next_leaf
+
+        #actualizar nodo original
+        node.keys = node.keys[:mid]
+        node.pointers = node.pointers[:mid]
+        node.num_keys = len(node.keys)
+        node.next_leaf = new_node_ptr
+
+        #escribir ambos nodos
+        self._write_node(node, node_ptr)
+        self._write_node(new_node, new_node_ptr)
+
+        #actualizar header (nuevo nodo creado)
+        self._write_header(root_ptr, total_nodes + 1)
+
+        #clave promovida
+        promoted_key = new_node.keys[0]
+
+        return promoted_key, new_node_ptr
+
+    def _split_internal(self, node, node_ptr):
+        mid = node.num_keys // 2
+        promoted_key = node.keys[mid]
+
+        #crear nuevo nodo interno
+        new_node = BPlusNode(
+            self.key_fmt,
+            self.key_size,
+            self.ORDER,
+            self.PAGE_SIZE,
+            node_type=0,
+            is_root=0
+        )
+
+        new_node.parent_ptr = node.parent_ptr
+
+        # reservar espacio
+        root_ptr, total_nodes = self._read_header()
+        new_node_ptr = self.HEADER_SIZE + total_nodes * self.PAGE_SIZE
+
+        # dividir (mid no se queda en ninguno)
+        new_node.keys = node.keys[mid + 1:]
+        new_node.pointers = node.pointers[mid + 1:]
+        new_node.num_keys = len(new_node.keys)
+
+        # actualizar parent_ptr de hijos movidos
+        for child_ptr in new_node.pointers:
+
+            child = self._read_node(child_ptr)
+
+            child.parent_ptr = new_node_ptr
+
+            self._write_node(child, child_ptr)
+
+        # nodo original
+        node.keys = node.keys[:mid]
+        node.pointers = node.pointers[:mid + 1]
+        node.num_keys = len(node.keys)
+
+        # escribir
+        self._write_node(node, node_ptr)
+        self._write_node(new_node, new_node_ptr)
+
+        # actualizar header
+        self._write_header(root_ptr, total_nodes + 1)
+
+        return promoted_key, new_node_ptr
