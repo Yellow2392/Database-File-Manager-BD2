@@ -146,6 +146,8 @@ La sintaxis del lenguaje soportado se rige por la siguiente gramática libre de 
 - `POINT` es un tipo de dato compuesto de 2 datos de tipo `float`. Se simplificó la forma de llegar a este tipo de dato mediante instanciar el tipo `POINT` en la declaración de creación de la tabla (siendo que al declarar este tipo al leer un archivo CSV en la carga de datos, asume que la columna sobre la que se aplica y la siguiente serán las coordenadas espaciales `x,y` compuestas).
 - El parser no permite en esta versión un filtro de selección de columnas al realizar una operación de `SELECT`. Siendo obligatorio usar `*` seguido de la palabra reservada.
 - El tipo de dato `DATE` se comporta como un `VARCHAR` de longitud máxima de 19 bytes (siguiendo el formato `YYYY-MM-DD HH:mm:ss`). Este cambio dista del tipo de manejo de los motores de base de datos reales, siendo que internamente estos manejan el tamaño del tipo `DATE` mediante 4 bytes (tratándolo de manera parecida a un `INT`).
+- Se ha implementado el `GROUP BY` bajo un caso de uso simplificado y directo (`SELECT * FROM <ID> GROUP BY <ID> ;`). En esta versión del parser, la agrupación es mutuamente excluyente con la cláusula `WHERE` y asume implícitamente el conteo (COUNT) de los registros sin requerir declarar funciones de agregación en la proyección del SELECT. Esto se hace para simplificar el parser ya establecido durante las semanas de trabajo.
+- El `ORDER BY` opera exclusivamente como un sufijo opcional tras una condición de filtrado (`WHERE`). Su detección en el AST delega el ordenamiento físico al algoritmo de External Merge Sort, lo que garantiza que consultas masivas se ordenen en disco sin riesgo de saturar la memoria RAM.
 
 ---
 
