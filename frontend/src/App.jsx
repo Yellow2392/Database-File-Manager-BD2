@@ -15,7 +15,7 @@ const highlightSQL = (text) => {
     'SELECT', 'FROM', 'WHERE', 'INSERT', 'INTO', 'VALUES', 
     'CREATE', 'TABLE', 'DROP', 'INDEX', 'DELETE', 'RADIUS', 'POINT', 
     'IN', 'AND', 'OR', 'NOT', 'NULL', 'PRIMARY', 'KEY', 
-    'FILE', 'DELIMITER', 'BETWEEN', 'GROUP', 'BY'
+    'FILE', 'DELIMITER', 'BETWEEN', 'GROUP', 'BY','UPDATE', 'SET'
   ];
   
   const types = ['INT', 'VARCHAR', 'FLOAT', 'BOOLEAN', 'DATE'];
@@ -50,6 +50,10 @@ function App() {
   const [hoveredCoords, setHoveredCoords] = useState(null)
   const [toast, setToast] = useState(null)
   const plotContainerRef = useRef(null)
+  const [view, setView] = useState('standard'); // 'standard' o 'concurrency'
+  const [tx1, setTx1] = useState('-- INSERT transaction 1');
+  const [tx2, setTx2] = useState('-- INSERT transaction 2');
+  const [concurrencyResult, setConcurrencyResult] = useState(null);
 
   const showToast = (type, message) => {
     setToast({ type, message })
@@ -188,6 +192,40 @@ function App() {
     }
   }
 
+  const executeConcurrency = async () => {
+    setLoading(true);
+    setError(null);
+    setConcurrencyResult(null);
+
+    const parseTextToQueries = (text) => {
+      return text
+        .split(';') // Dividir por punto y coma
+        .map(q => q.trim()) // Quitar espacios en blanco y saltos de línea
+        .filter(q => q.length > 0) // Ignorar los vacíos
+        .map(q => q + ';'); // Volver a agregar el ';'
+    };
+
+    const payload = {
+      transactions: [
+        { tx_id: 1, queries: parseTextToQueries(tx1) },
+        { tx_id: 2, queries: parseTextToQueries(tx2) }
+      ]
+    };
+
+    try {
+      const res = await axios.post('http://localhost:8000/simulate-concurrency', payload);
+      setConcurrencyResult(res.data);
+      fetchSchema();
+      showToast('success', 'Simulación completada');
+    } catch (err) {
+      const message = err.response?.data?.detail || err.message || 'Error en la simulación';
+      setError(message);
+      showToast('error', message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleRowHover = (row) => {
     const coordCols = [];
     result.columns.forEach((colName, idx) => {
@@ -243,6 +281,13 @@ function App() {
         />
 
         <main className="main-content">
+        {/* Selector de modo */}
+        <div className="view-tabs">
+          <button className={view === 'standard' ? 'active' : ''} onClick={() => setView('standard')}>Query Editor</button>
+          <button className={view === 'concurrency' ? 'active' : ''} onClick={() => setView('concurrency')}>Concurrency Lab</button>
+        </div>
+
+        {view === 'standard' ? (
           <div className="editor-pane">
             <div className="editor-toolbar">
               <button onClick={executeQuery} disabled={loading} className="run-button">
@@ -270,6 +315,35 @@ function App() {
               </div>
             </div>
           </div>
+        ) : (
+          <div className="concurrency-pane">
+            <div className="editor-toolbar">
+              <button onClick={executeConcurrency} disabled={loading} className="run-button concurrency">
+                ▶ {loading ? 'Simulating...' : 'Run Parallel Transactions'}
+              </button>
+            </div>
+            
+            <div className="dual-editor-container">
+              {/* Editor Transacción 1 */}
+              <div className="editor-block">
+                <label>Transaction 1</label>
+                <div className="editor-wrapper small">
+                  <div className="highlight-layer" dangerouslySetInnerHTML={{ __html: highlightSQL(tx1) }} />
+                  <textarea className="sql-input" value={tx1} onChange={(e) => setTx1(e.target.value)} spellCheck="false" />
+                </div>
+              </div>
+
+              {/* Editor Transacción 2 */}
+              <div className="editor-block">
+                <label>Transaction 2</label>
+                <div className="editor-wrapper small">
+                  <div className="highlight-layer" dangerouslySetInnerHTML={{ __html: highlightSQL(tx2) }} />
+                  <textarea className="sql-input" value={tx2} onChange={(e) => setTx2(e.target.value)} spellCheck="false" />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
           <div className="results-pane">
             {error && <div className="error-box">{error}</div>}
@@ -316,10 +390,12 @@ function App() {
 
         <aside className="sidebar right-sidebar" style={{ width: `${rightWidth}px`, minWidth: `${rightWidth}px` }}>
           <div className="sidebar-header">
-            <h2>📊 Analytics & Plot</h2>
+            <h2>{view === 'standard' ? '📊 Analytics' : '📜 Transaction Logs'}</h2>
           </div>
           
-          <div className="metrics-container">
+          {view === 'standard' ? (
+            <>
+            <div className="metrics-container">
             <div className="metric-card">
               <span className="metric-title">⏱️ Execution Time</span>
               <span className="metric-value">{result?.metrics?.executionTime || '-'}</span>
@@ -352,6 +428,33 @@ function App() {
               </div>
             )}
           </div>
+            </>
+          ) : (
+            <div className="concurrency-info">
+              <div className="metrics-container">
+                <div className="metric-card">
+                  <span className="metric-title">⏱️ Simulation Time</span>
+                  <span className="metric-value">{concurrencyResult?.metrics?.simulationTime || '-'}</span>
+                </div>
+                <div className="metric-card">
+                  <span className="metric-title">🔑 Total TXs</span>
+                  <span className="metric-value">{concurrencyResult?.metrics?.totalTransactions || '-'}</span>
+                </div>
+              </div>
+
+              <div className="log-viewer">
+                <h3>Execution Timeline</h3>
+                <div className="log-console">
+                  {concurrencyResult?.log?.map((line, i) => (
+                    <div key={i} className="log-line">
+                      <span className="log-number">{i + 1}</span>
+                      <span className="log-text">{line}</span>
+                    </div>
+                  )) || <div className="no-plot-text">No logs yet. Run simulation to see concurrency events.</div>}
+                </div>
+              </div>
+            </div>
+          )}
         </aside>
       </div>
     </>

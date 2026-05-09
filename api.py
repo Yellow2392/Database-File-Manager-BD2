@@ -5,7 +5,10 @@ from pydantic import BaseModel
 from backend.parser.sql_lexer import DBMSSqlLexer
 from backend.parser.sql_parser import DBMSSqlParser
 from backend.executor import Executor
+from backend.transaction_manager import TransactionManager
 import time
+import threading
+from typing import List
 
 app = FastAPI()
 
@@ -21,6 +24,20 @@ app.add_middleware(
 # Estructura del cuerpo de la petición esperada desde Axios
 class QueryRequest(BaseModel):
     query: str
+
+# Estructuras para simulación de concurrencia
+class TransactionPayload(BaseModel):
+    tx_id: int
+    queries: List[str]
+
+class ConcurrencyRequest(BaseModel):
+    transactions: List[TransactionPayload]
+
+# Helper de parsing
+def parse_query(sql_text: str):
+    lexer = DBMSSqlLexer()
+    parser = DBMSSqlParser(lexer.tokenize(sql_text))
+    return parser.parse()
 
 @app.get("/schema")
 def get_schema():
@@ -49,9 +66,7 @@ def execute_query(request: QueryRequest):
         start_time = time.time()
         
         # 1. Parseo
-        lexer = DBMSSqlLexer()
-        parser = DBMSSqlParser(lexer.tokenize(request.query))
-        ast = parser.parse()
+        ast = parse_query(request.query)
         
         # 2. Motor de Ejecución
         motor = Executor()
@@ -72,6 +87,52 @@ def execute_query(request: QueryRequest):
                 "diskWrites": resultados.get("diskWrites", 0)
             },
             "plot":  resultados.get("plot", None)
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
+@app.post("/simulate-concurrency")
+def simulate_concurrency(request: ConcurrencyRequest):
+    try:
+        start_time = time.time()
+        motor = Executor()
+        tx_manager = TransactionManager(motor)
+        
+        hilos = []
+        
+        for tx in request.transactions: # Por cada transacción
+            ast_list = []
+            
+            for sql in tx.queries:
+                ast = parse_query(sql)
+                if ast:
+                    ast_list.append(ast)
+            
+            # Un hilo para esta transacción
+            t = threading.Thread(
+                target=tx_manager.execute_transaction, 
+                args=(tx.tx_id, ast_list)
+            )
+            hilos.append(t)
+            
+        # Concurrencia
+        for t in hilos:
+            t.start()
+            
+        # Todas las transacciones deben finalizar
+        for t in hilos:
+            t.join()
+            
+        execution_time = (time.time() - start_time) * 1000
+            
+        return {
+            "status": "success",
+            "metrics": {
+                "simulationTime": f"{execution_time:.2f} ms",
+                "totalTransactions": len(request.transactions)
+            },
+            "log": tx_manager.log
         }
         
     except Exception as e:

@@ -59,13 +59,15 @@ class Executor:
             return self.execute_delete(ast)
         elif ast['statement'] == 'DROP':
             return self.execute_drop(ast)
+        elif ast['statement'] == 'UPDATE':
+            return self.execute_update(ast)
     
     def _get_index_instance(self, tech_name, meta, key_column):
         tech = tech_name.upper() if tech_name else 'NONE'
         
         if tech == 'SEQUENTIAL':
             return SequentialFile(meta, key_column, self.data_dir)
-        elif tech == "HASH":                                      
+        if tech == "HASH":
             return ExtendibleHashing(meta, key_column, self.data_dir)
         if tech == 'BTREE':
             return BPlusTree(meta, key_column, self.data_dir)
@@ -97,18 +99,9 @@ class Executor:
         meta.primary_index = primary_index
         self.catalog[table_name] = meta
         
-        print(f"[OK] Tabla {table_name} creada con índice  {primary_index.__class__.__name__}.")
+        print(f"[OK] Tabla {table_name} creada con índice {primary_index.__class__.__name__}.")
         
-
-
-        
-        ####################################################
-        #GUARDAR CATALOGO EN CREACION DE TABLA SINH BULKLOAD
-        ####################################################
         self._save_system_catalog()
-
-
-
         file_path = ast.get('file')
         delimiter_char = ast.get('delimiter', ',')
 
@@ -179,8 +172,66 @@ class Executor:
             "diskReads": index.disk_reads,
             "diskWrites": index.disk_writes
         }
-        
-        
+
+    def execute_update(self, ast):
+            table_name = ast['table']
+            if table_name not in self.catalog:
+                print(f"[ERROR] La tabla {table_name} no existe.")
+                return
+
+            meta = self.catalog[table_name]
+            index = meta.primary_index
+            
+            # 1. Obtener la llave a buscar
+            key_to_update = ast['condition']['key']
+            index.disk_reads, index.disk_writes = 0, 0
+            
+            # 2. Buscar el registro actual (lectura física)
+            raw_record = index.search(key_to_update)
+            if not raw_record:
+                print(f"[INFO] Registro con llave {key_to_update} no encontrado para actualizar.")
+                return
+                
+            # raw_record es una tupla estática en Python, la pasamos a lista para modificarla
+            record_list = list(raw_record)
+            
+            # 3. Modificar los valores según el AST
+            set_columns = ast['set'] 
+            
+            for col_name, new_val in set_columns.items():
+                # Buscar el índice de la columna en la metadata de la tabla
+                col_idx = -1
+                col_type = None
+                for i, col in enumerate(meta.columns):
+                    if col['name'] == col_name:
+                        col_idx = i
+                        col_type = col['type'].upper()
+                        break
+                        
+                if col_idx != -1:
+                    # Castear el valor de texto del SQL a los bits que guarda python
+                    if col_type == 'VARCHAR':
+                        parsed_val = str(new_val).encode('utf-8')
+                    elif col_type == 'INT':
+                        parsed_val = int(new_val)
+                    elif col_type == 'FLOAT':
+                        parsed_val = float(new_val)
+                    else:
+                        parsed_val = new_val
+                        
+                    record_list[col_idx] = parsed_val
+            
+            modified_record_tuple = tuple(record_list)
+            
+            # 4. Borrado lógico del original
+            index.remove(key_to_update)
+            
+            # 5. Insertar la tupla modificada
+            index.add(modified_record_tuple)
+            
+            print(f"[OK] Registro con llave '{key_to_update}' actualizado con éxito.")
+            print(f"-> Accesos a disco: {index.disk_reads} reads, {index.disk_writes} writes.")
+
     def execute_delete(self, ast):
         table_name = ast['table']
         if table_name not in self.catalog: 

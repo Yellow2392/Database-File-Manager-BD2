@@ -44,6 +44,8 @@ class DBMSSqlParser:
             return self.parse_delete()
         elif token.type == 'DROP':
             return self.parse_drop()
+        elif token.type == 'UPDATE':
+            return self.parse_update()
         else:
             raise SyntaxError(f"Sentencia SQL no soportada: {token.value}")
         
@@ -377,4 +379,37 @@ class DBMSSqlParser:
         return {
             "statement": "DROP",
             "table": table_name
+        }
+    
+    """
+    =========================================== UPDATE ===========================================
+    """
+    def parse_update(self):
+        # Regla: UPDATE <id> SET <id> = <valor> WHERE <condicion> ;
+        self.match('UPDATE')
+        table_name = self.match('ID').value
+        
+        self.match('SET')
+        update_col = self.match('ID').value
+        
+        self.match('OP', '=')
+        
+        # El valor puede ser número o texto
+        val_token = self.current_token()
+        if val_token.type not in ('NUMBER', 'STRING'):
+            raise SyntaxError("Se esperaba un número o cadena después de '='")
+        new_value = self.match(val_token.type).value
+        
+        self.match('WHERE')
+        where_col = self.match('ID').value
+        
+        condition_ast = self.parse_condition(where_col)
+        
+        self.match('SYMBOL', ';')
+
+        return {
+            "statement": "UPDATE",
+            "table": table_name,
+            "set": {update_col: new_value},
+            "condition": condition_ast
         }
