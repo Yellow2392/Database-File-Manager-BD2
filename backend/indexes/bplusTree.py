@@ -155,7 +155,7 @@ class BPlusTree(BaseIndex):
     TEMP_PAGE_HEADER_FORMAT = 'i12x'
     TEMP_PAGE_HEADER_SIZE = struct.calcsize(TEMP_PAGE_HEADER_FORMAT)
 
-    def __init__(self, table_meta, key_column, data_dir="backend/data", sort_buffer_size=128 * 1024 * 1024):
+    def __init__(self, table_meta, key_column, data_dir="backend/data", sort_buffer_size=128 * 1024 * 1024, heap_chunk_size=20000):
         super().__init__(table_meta, key_column, data_dir)
 
         # tipo de clave desde metadata
@@ -174,6 +174,7 @@ class BPlusTree(BaseIndex):
         self.key_size = TYPE_MAP[key_type]['size']
         self.key_type = key_type
         self.sort_buffer_size = sort_buffer_size
+        self.heap_chunk_size = heap_chunk_size
 
         # ORDER basado en PAGE_SIZE
         self.ORDER = (self.PAGE_SIZE - BPlusNode.HEADER_SIZE - BPlusNode.INT_SIZE) // (
@@ -1199,7 +1200,6 @@ class BPlusTree(BaseIndex):
 
     def _generate_index_entries(self, rows, temp_path):
         key_idx = None
-
         for i, col in enumerate(self.table_meta.columns):
             if col["name"] == self.key_column:
                 key_idx = i
@@ -1209,26 +1209,46 @@ class BPlusTree(BaseIndex):
         entry_format = self.key_fmt + pointer_fmt
         entry_size = struct.calcsize(entry_format)
 
-        usable_bytes = self.PAGE_SIZE - self.TEMP_PAGE_HEADER_SIZE
+        usable_bytes =  self.PAGE_SIZE - self.TEMP_PAGE_HEADER_SIZE
         max_entries = usable_bytes // entry_size
 
         buffer = []
 
         total_entries = 0
+    
+        heap_chunk = []
+        first_chunk = True
 
         with open(temp_path, 'wb') as f:
             for parsed in rows:
-                offset = self.heap.insert(tuple(parsed))
-                key = parsed[key_idx]
-                buffer.append((key, offset))
-                total_entries += 1
+                heap_chunk.append(tuple(parsed))
+                # insertar chunk masivo
+                if len(heap_chunk) >= self.heap_chunk_size:
+                    offsets = self.heap.bulk_insert( heap_chunk,reset=first_chunk)
+                    first_chunk = False
+                    for record_tuple, offset in zip(heap_chunk, offsets):
+                        key = record_tuple[key_idx]
+                        buffer.append((key, offset))
+                        total_entries += 1
+                        if len(buffer) >= max_entries:
+                            self._flush_index_page( f,buffer)
+                            buffer.clear()
+                    heap_chunk.clear()
 
-                if len(buffer) >= max_entries:
-                    self._flush_index_page(f, buffer)
-                    buffer.clear()
+            # ultimo chunk
+            if heap_chunk:
+                offsets = self.heap.bulk_insert(heap_chunk,reset=first_chunk)
+                for record_tuple, offset in zip(heap_chunk, offsets):
+                    key = record_tuple[key_idx]
+                    buffer.append((key, offset))
+                    total_entries += 1
+                    if len(buffer) >= max_entries:
+                        self._flush_index_page(f,buffer)
+                        buffer.clear()
 
+            # ultimo buffer idx
             if buffer:
-                self._flush_index_page(f, buffer)
+                self._flush_index_page(f,buffer)
 
         return total_entries
 
