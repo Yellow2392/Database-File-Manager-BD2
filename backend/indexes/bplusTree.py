@@ -1182,76 +1182,173 @@ class BPlusTree(BaseIndex):
             if first_row is None:
                 return
 
-            header_names = [c["name"] for c in self.table_meta.columns]
-
-            has_header = set(header_names).issubset(set(first_row))
+            has_header = not self._matches_schema(first_row)
 
             if has_header:
-
-                header = first_row
-
-                column_indexes = []
-
-                for col in self.table_meta.columns:
-
-                    try:
-                        idx = header.index(col["name"])
-
-                    except ValueError:
-
-                        raise Exception(
-                            f"Columna '{col['name']}' no encontrada en CSV"
-                        )
-
-                    column_indexes.append(idx)
-
                 rows = reader
-
             else:
-
-                column_indexes = list(range(len(self.table_meta.columns)))
-
                 rows = itertools.chain([first_row], reader)
 
             for row in rows:
 
                 parsed = []
 
-                for csv_idx, col in zip(column_indexes, self.table_meta.columns):
+                csv_idx = 0
 
-                    value = row[csv_idx].strip()
+                for col in self.table_meta.columns:
 
                     col_type = col["type"].upper()
+
+                    value = row[csv_idx].strip()
 
                     if col_type == "INT":
 
                         parsed.append(int(value))
+                        csv_idx += 1
 
                     elif col_type == "FLOAT":
 
                         parsed.append(float(value))
+                        csv_idx += 1
 
                     elif col_type == "VARCHAR":
 
                         parsed.append(value.encode('utf-8'))
+                        csv_idx += 1
+
+                    elif col_type == "BOOLEAN":
+
+                        parsed.append(
+                            value.lower() in ("true", "1")
+                        )
+
+                        csv_idx += 1
+
+                    elif col_type == "DATE":
+
+                        parsed.append(
+                            value.encode('utf-8')
+                        )
+
+                        csv_idx += 1
 
                     elif col_type == "POINT":
 
-                        x, y = value.strip("()").split()
+                        try:
 
-                        parsed.extend([
-                            float(x),
-                            float(y)
-                        ])
+                            # Caso CSV real:
+                            # longitude,latitude
+
+                            x_val = float(row[csv_idx].strip())
+                            y_val = float(row[csv_idx + 1].strip())
+
+                            parsed.extend([
+                                x_val,
+                                y_val
+                            ])
+
+                            csv_idx += 2
+
+                        except:
+
+                            # Caso POINT(x,y)
+                            if value.upper().startswith("POINT"):
+
+                                coords = value[
+                                    value.find("(")+1:value.find(")")
+                                ]
+
+                                x, y = coords.split(",")
+
+                            # Caso (x y) o (x,y)
+                            elif value.startswith("(") and value.endswith(")"):
+
+                                coords = value.strip("()")
+
+                                if "," in coords:
+                                    x, y = coords.split(",")
+                                else:
+                                    x, y = coords.split()
+
+                            # Caso x,y
+                            elif "," in value:
+
+                                x, y = value.split(",")
+
+                            else:
+
+                                raise ValueError(
+                                    f"Formato POINT inválido: {value}"
+                                )
+
+                            parsed.extend([
+                                float(x.strip()),
+                                float(y.strip())
+                            ])
+
+                            csv_idx += 1
 
                     else:
 
                         parsed.append(value)
+                        csv_idx += 1
 
-                # columna oculta
+                # columna oculta is_deleted
                 parsed.append(False)
 
                 self.add(tuple(parsed), is_bulk=True)
+                
+    def _matches_schema(self, row):
 
+        try:
+            csv_idx = 0
+
+            for col in self.table_meta.columns:
+
+                col_type = col["type"].upper()
+
+                if col_type == "POINT":
+
+                    # POINT como 2 columnas CSV consecutivas
+                    float(row[csv_idx].strip())
+                    float(row[csv_idx + 1].strip())
+
+                    csv_idx += 2
+
+                else:
+
+                    value = row[csv_idx].strip()
+
+                    if col_type == "INT":
+
+                        int(value)
+
+                    elif col_type == "FLOAT":
+
+                        float(value)
+
+                    elif col_type == "BOOLEAN":
+
+                        if value.lower() not in (
+                            "true", "false", "0", "1"
+                        ):
+                            return False
+
+                    elif col_type == "DATE":
+
+                        pass
+
+                    elif col_type == "VARCHAR":
+
+                        pass
+
+                    csv_idx += 1
+
+            return True
+
+        except:
+
+            return False
+        
     def knn_search(self, key, k):
         raise NotImplementedError("knn_search no soportado")
