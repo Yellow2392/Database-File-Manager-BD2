@@ -94,7 +94,7 @@ class Executor:
         meta.primary_index = primary_index
         self.catalog[table_name] = meta
         
-        print(f"[OK] Tabla {table_name} creada con índice  {primary_index.__class__.__name__}.")
+        print(f"[OK] Tabla {table_name} creada con índice {primary_index.__class__.__name__}.")
         
         self._save_system_catalog()
         file_path = ast.get('file')
