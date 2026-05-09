@@ -270,7 +270,7 @@ class ExtendibleHashing(BaseIndex):
                         
                         try:
                             val = row[i].strip()
-                            print(f"  -> Columna '{col_name}' | Valor Raw: '{val}' | Tipo: {tipo}", end=" ")
+                            #print(f"  -> Columna '{col_name}' | Valor Raw: '{val}' | Tipo: {tipo}", end=" ")
                             
                             if tipo == 'INT':
                                 parsed_val = int(val)
