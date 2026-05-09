@@ -6,6 +6,7 @@ from backend.catalog import TableMetadata
 from backend.indexes.sequential import SequentialFile
 from backend.indexes.rtree import RTreeIndex
 from backend.indexes.hash import ExtendibleHashing
+from backend.indexes.bplusTree import BPlusTree
 
 from .visualizer import save_spatial_plot
 
@@ -63,7 +64,8 @@ class Executor:
             return SequentialFile(meta, key_column, self.data_dir)
         if tech == "HASH":                                      
             return ExtendibleHashing(meta, key_column, self.data_dir)
-        #TODO: elif tech == 'BTREE':
+        if tech == 'BTREE':
+            return BPlusTree(meta, key_column, self.data_dir)
         if tech == 'RTREE':
             return RTreeIndex(meta, key_column, self.data_dir)
         else:
