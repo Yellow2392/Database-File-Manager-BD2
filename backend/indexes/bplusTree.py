@@ -765,3 +765,491 @@ class BPlusTree(BaseIndex):
         self._write_header(root_ptr, total_nodes + 1)
 
         return promoted_key, new_node_ptr
+    def delete(self, key):
+        root_ptr, total_nodes = self._read_header()
+
+        deleted = self._delete_recursive(key, root_ptr)
+        if deleted is None:
+            return None
+
+        root = self._read_node(root_ptr)
+
+        # si raíz interna queda vacía -> bajar nivel
+        if root.num_keys == 0 and root.node_type == 0:
+            new_root_ptr = root.pointers[0]
+
+            # quitar al root antiguo
+            root.is_root = 0
+            self._write_node(root, root_ptr)
+
+            # marcar nuevo root
+            new_root = self._read_node(new_root_ptr)
+            new_root.is_root = 1
+            new_root.parent_ptr = -1
+            self._write_node(new_root, new_root_ptr)
+
+            self._write_header(new_root_ptr, total_nodes)
+
+        return deleted
+
+    def remove(self, key):
+        # eliminar del arbol
+        offset = self.delete(key)
+
+        if offset is None:
+            return None
+
+        # eliminar del heap
+        deleted = self.heap.delete(offset)
+
+        if deleted is None:
+            return None
+
+        return self.table_meta.clean_tuple(deleted)
+
+    def _delete_recursive(self, key, node_ptr, parent_ptr=None, index_in_parent=None):
+        node = self._read_node(node_ptr)
+
+        #hoja
+        if node.node_type == 1:
+            old_first_key = node.keys[0] if node.num_keys > 0 else None
+            node_ptr, node, removed = self._remove_from_leaf(node,key,node_ptr)
+
+            if removed is None:
+                return None #no encontrada
+            
+            new_first_key = node.keys[0] if node.num_keys > 0 else None
+
+            if (
+                old_first_key is not None and
+                new_first_key is not None and
+                self._compare_keys(old_first_key, new_first_key) != 0
+            ):
+                self._update_parent_separator_after_delete(
+                    parent_ptr,
+                    index_in_parent,
+                    old_first_key,
+                    new_first_key
+                )
+
+            MIN_KEYS = self._min_keys_leaf()
+
+            if node.num_keys < MIN_KEYS and parent_ptr is not None:
+                self._rebalance_leaf(node_ptr, parent_ptr, index_in_parent)
+            else:
+                self._write_node(node, node_ptr)
+
+            return removed
+
+        #interno
+        else:
+            #bajar al hijo
+            child_idx = self._binary_search_internal(node, key)
+            child_ptr = node.pointers[child_idx]
+
+            #llamada recursiva
+            deleted = self._delete_recursive(key, child_ptr, node_ptr, child_idx)
+
+            if deleted is None:
+                return None
+
+            node = self._read_node(node_ptr)
+
+            MIN_KEYS = self._min_keys_internal()
+
+            if node.num_keys < MIN_KEYS and parent_ptr is not None:
+                self._rebalance_internal(node_ptr, parent_ptr, index_in_parent)
+            return deleted
+        
+    def _remove_from_leaf(self, node, key, node_ptr):
+        current_node = node
+        current_ptr = node_ptr
+
+        while True:
+
+            idx = self._binary_search_leaf(current_node, key)
+
+            if idx != -1:
+                removed_pointer = current_node.pointers[idx]
+
+                del current_node.keys[idx]
+                del current_node.pointers[idx]
+                current_node.num_keys -= 1
+
+                self._write_node(current_node, current_ptr)
+
+                return current_ptr, current_node, removed_pointer
+
+            # si esta hoja ya contiene claves mayores,
+            # nunca aparecerá después
+            if ( current_node.num_keys > 0 and self._compare_keys(current_node.keys[-1], key) > 0):
+                break
+
+            # no hay más hojas
+            if current_node.next_leaf == -1:
+                break
+
+            next_ptr = current_node.next_leaf
+            next_node = self._read_node(next_ptr)
+
+            if (next_node.num_keys > 0 and self._compare_keys(next_node.keys[0], key) > 0):
+                break
+
+            current_ptr = next_ptr
+            current_node = next_node
+
+        return node_ptr, node, None
+    
+    def _remove_from_internal(self, node, index): #Elimina la clave y el puntero hijo de un nodo interno en la posición index.
+        del node.keys[index]
+        del node.pointers[index + 1]
+        node.num_keys -= 1
+
+    def _binary_search_internal_leftmost(self, node, key):
+
+        left, right = 0, node.num_keys - 1
+        result = node.num_keys
+
+        while left <= right:
+
+            mid = (left + right) // 2
+            if self._compare_keys(node.keys[mid], key) < 0:
+                left = mid + 1
+            else:
+                result = mid
+                right = mid - 1
+
+        return min(result, len(node.pointers) - 1)
+
+    def _update_parent_separator_after_delete(self, parent_ptr, child_index, old_key, new_key):
+
+        current_parent_ptr = parent_ptr
+        current_child_index = child_index
+
+        while current_parent_ptr != -1 and current_parent_ptr is not None:
+
+            parent = self._read_node(current_parent_ptr)
+
+            if current_child_index > 0:
+                sep_idx = current_child_index - 1
+                if sep_idx < len(parent.keys):
+                    parent.keys[sep_idx] = new_key
+                    self._write_node(parent, current_parent_ptr)
+                break
+
+            old_parent_ptr = current_parent_ptr
+            current_parent_ptr = parent.parent_ptr
+
+            if current_parent_ptr == -1:
+                break
+
+            grandparent = self._read_node(current_parent_ptr)
+
+            try:
+                current_child_index = grandparent.pointers.index(old_parent_ptr)
+            except ValueError:
+                break
+
+    def _rebalance_leaf(self, node_ptr, parent_ptr, index_in_parent):
+        node = self._read_node(node_ptr)
+        parent = self._read_node(parent_ptr)
+
+        MIN_KEYS = self._min_keys_leaf()
+
+        #distribuir con hermano izquierdo
+        if index_in_parent > 0:
+            left_ptr = parent.pointers[index_in_parent - 1]
+            left = self._read_node(left_ptr)
+
+            if left.num_keys > MIN_KEYS:
+                # mover ultima clave del izquierdo
+                key = left.keys.pop(-1)
+                ptr = left.pointers.pop(-1)
+                left.num_keys -= 1
+
+                node.keys.insert(0, key)
+                node.pointers.insert(0, ptr)
+                node.num_keys += 1
+
+                # actualizar separador en padre
+                parent.keys[index_in_parent - 1] = node.keys[0]
+
+                self._write_node(left, left_ptr)
+                self._write_node(node, node_ptr)
+                self._write_node(parent, parent_ptr)
+                return
+
+        #distribuir con hermano derecho
+        if index_in_parent < len(parent.pointers) - 1:
+            right_ptr = parent.pointers[index_in_parent + 1]
+            right = self._read_node(right_ptr)
+
+            if right.num_keys > MIN_KEYS:
+                # mover primera clave del derecho
+                key = right.keys.pop(0)
+                ptr = right.pointers.pop(0)
+                right.num_keys -= 1
+
+                node.keys.append(key)
+                node.pointers.append(ptr)
+                node.num_keys += 1
+
+                #actualizar padre
+                parent.keys[index_in_parent] = right.keys[0]
+
+                self._write_node(right, right_ptr)
+                self._write_node(node, node_ptr)
+                self._write_node(parent, parent_ptr)
+                
+                return
+
+        # merge con hermano izquierdo
+        if index_in_parent > 0:
+            left_ptr = parent.pointers[index_in_parent - 1]
+            left = self._read_node(left_ptr)
+
+            left.keys.extend(node.keys)
+            left.pointers.extend(node.pointers)
+            left.num_keys = len(left.keys)
+            left.next_leaf = node.next_leaf
+
+            self._write_node(left, left_ptr)
+
+            self._remove_from_internal(parent, index_in_parent - 1)
+            if left.num_keys > 0:
+                self._update_parent_separator_after_delete(
+                    parent_ptr,
+                    index_in_parent - 1,
+                    parent.keys[index_in_parent - 1]
+                    if index_in_parent - 1 < len(parent.keys)
+                    else None,
+                    left.keys[0]
+                )
+            self._write_node(parent, parent_ptr)
+
+        else:
+            #merge con hermano derecho
+            right_ptr = parent.pointers[index_in_parent + 1]
+            right = self._read_node(right_ptr)
+
+            node.keys.extend(right.keys)
+            node.pointers.extend(right.pointers)
+            node.num_keys = len(node.keys)
+            node.next_leaf = right.next_leaf
+
+            self._write_node(node, node_ptr)
+
+            self._remove_from_internal(parent, index_in_parent)
+            if node.num_keys > 0:
+                self._update_parent_separator_after_delete(
+                    parent_ptr,
+                    index_in_parent,
+                    parent.keys[index_in_parent]
+                    if index_in_parent < len(parent.keys)
+                    else None,
+                    node.keys[0]
+                )
+            self._write_node(parent, parent_ptr)
+
+    
+    def _rebalance_internal(self, node_ptr, parent_ptr, index_in_parent):
+        node = self._read_node(node_ptr)
+        parent = self._read_node(parent_ptr)
+
+        MIN_KEYS = self._min_keys_internal()
+
+        # redistribuir con hermano izquierdo
+        if index_in_parent > 0:
+            left_ptr = parent.pointers[index_in_parent - 1]
+            left = self._read_node(left_ptr)
+
+            if left.num_keys > MIN_KEYS:
+                # tomar del hermano izquierdo
+                borrowed_key = left.keys.pop(-1)
+                borrowed_ptr = left.pointers.pop(-1)
+                left.num_keys -= 1
+
+                # clave del padre baja
+                node.keys.insert(0, parent.keys[index_in_parent - 1])
+                node.pointers.insert(0, borrowed_ptr)
+                borrowed_child = self._read_node(borrowed_ptr)
+
+                borrowed_child.parent_ptr = node_ptr
+
+                self._write_node(borrowed_child, borrowed_ptr)
+
+                node.num_keys += 1
+
+                # actualizar padre
+                parent.keys[index_in_parent - 1] = borrowed_key
+
+                self._write_node(left, left_ptr)
+                self._write_node(node, node_ptr)
+                self._write_node(parent, parent_ptr)
+                return
+
+        #redistribuir con hermano derecho
+        if index_in_parent < len(parent.pointers) - 1:
+            right_ptr = parent.pointers[index_in_parent + 1]
+            right = self._read_node(right_ptr)
+
+            if right.num_keys > MIN_KEYS:
+                # tomar del hermano derecho
+                borrowed_key = right.keys.pop(0)
+                borrowed_ptr = right.pointers.pop(0)
+                right.num_keys -= 1
+
+                # clave del padre baja
+                node.keys.append(parent.keys[index_in_parent])
+                node.pointers.append(borrowed_ptr)
+                borrowed_child = self._read_node(borrowed_ptr)
+
+                borrowed_child.parent_ptr = node_ptr
+
+                self._write_node(borrowed_child, borrowed_ptr)
+
+
+                node.num_keys += 1
+
+                # actualizar padre
+                parent.keys[index_in_parent] = borrowed_key
+
+                self._write_node(right, right_ptr)
+                self._write_node(node, node_ptr)
+                self._write_node(parent, parent_ptr)
+                return
+
+        #merge con hermano izquierdo
+        if index_in_parent > 0:
+            left_ptr = parent.pointers[index_in_parent - 1]
+            left = self._read_node(left_ptr)
+
+            # clave del padre baja al merge
+            left.keys.append(parent.keys[index_in_parent - 1])
+            left.keys.extend(node.keys)
+            left.pointers.extend(node.pointers)
+            left.num_keys = len(left.keys)
+
+            # actualizar parent_ptr de hijos movidos
+            for child_ptr in node.pointers:
+
+                child = self._read_node(child_ptr)
+
+                child.parent_ptr = left_ptr
+
+                self._write_node(child, child_ptr)
+
+            self._write_node(left, left_ptr)
+
+            self._remove_from_internal(parent, index_in_parent-1)
+            self._write_node(parent, parent_ptr)
+
+        else:
+            #merge con hermano derecho
+            right_ptr = parent.pointers[index_in_parent + 1]
+            right = self._read_node(right_ptr)
+
+            #clave del padre baja
+            node.keys.append(parent.keys[index_in_parent])
+            node.keys.extend(right.keys)
+            node.pointers.extend(right.pointers)
+            node.num_keys = len(node.keys)
+
+            # actualizar parent_ptr de hijos movidos
+            for child_ptr in right.pointers:
+
+                child = self._read_node(child_ptr)
+
+                child.parent_ptr = node_ptr
+
+                self._write_node(child, child_ptr)
+
+            self._write_node(node, node_ptr)
+
+            self._remove_from_internal(parent, index_in_parent)
+            self._write_node(parent, parent_ptr)
+
+    
+    def bulk_load(self, csv_path, delimiter=','):
+        with open(csv_path, 'r', newline='', encoding='utf-8') as f:
+
+            reader = csv.reader(f, delimiter=delimiter)
+
+            first_row = next(reader, None)
+
+            if first_row is None:
+                return
+
+            header_names = [c["name"] for c in self.table_meta.columns]
+
+            has_header = set(header_names).issubset(set(first_row))
+
+            if has_header:
+
+                header = first_row
+
+                column_indexes = []
+
+                for col in self.table_meta.columns:
+
+                    try:
+                        idx = header.index(col["name"])
+
+                    except ValueError:
+
+                        raise Exception(
+                            f"Columna '{col['name']}' no encontrada en CSV"
+                        )
+
+                    column_indexes.append(idx)
+
+                rows = reader
+
+            else:
+
+                column_indexes = list(range(len(self.table_meta.columns)))
+
+                rows = itertools.chain([first_row], reader)
+
+            for row in rows:
+
+                parsed = []
+
+                for csv_idx, col in zip(column_indexes, self.table_meta.columns):
+
+                    value = row[csv_idx].strip()
+
+                    col_type = col["type"].upper()
+
+                    if col_type == "INT":
+
+                        parsed.append(int(value))
+
+                    elif col_type == "FLOAT":
+
+                        parsed.append(float(value))
+
+                    elif col_type == "VARCHAR":
+
+                        parsed.append(value.encode('utf-8'))
+
+                    elif col_type == "POINT":
+
+                        x, y = value.strip("()").split()
+
+                        parsed.extend([
+                            float(x),
+                            float(y)
+                        ])
+
+                    else:
+
+                        parsed.append(value)
+
+                # columna oculta
+                parsed.append(False)
+
+                self.add(tuple(parsed), is_bulk=True)
+
+    def knn_search(self, key, k):
+        raise NotImplementedError("knn_search no soportado")
