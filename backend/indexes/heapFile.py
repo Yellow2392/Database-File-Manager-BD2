@@ -131,3 +131,105 @@ class HeapFile:
                 self._write_header(-1, total_pages + 1)
 
                 return self._page_offset(new_page) + self.PAGE_HEADER_SIZE
+    def delete(self, offset):
+        free_head, total_pages = self._read_header()
+
+        with open(self.filepath, 'r+b') as f:
+            f.seek(offset)
+
+            raw = f.read(self.RECORD_SIZE)
+
+            next_free, = struct.unpack(self.RECORD_META_FORMAT, raw[:self.RECORD_META_SIZE])
+
+            # ya eliminado
+            if next_free != -1:
+                return None
+
+            #recuperar record
+            payload = raw[self.RECORD_META_SIZE:]
+            deleted_record = struct.unpack(self.table_meta.struct_format, payload)
+
+            #metadata nueva
+            new_next = free_head if free_head != -1 else -2
+            new_meta = struct.pack(self.RECORD_META_FORMAT, new_next)
+
+            f.seek(offset)
+            f.write(new_meta)
+
+        # actualizar free list
+        self._write_header(offset, total_pages)
+
+        return deleted_record
+
+    def read(self, offset):
+        with open(self.filepath, 'rb') as f:
+            f.seek(offset)
+            raw = f.read(self.RECORD_SIZE)
+
+        next_free, = struct.unpack(self.RECORD_META_FORMAT, raw[:self.RECORD_META_SIZE])
+
+        #liminado
+        if next_free != -1:
+            return None
+
+        payload = raw[self.RECORD_META_SIZE:]
+
+        return struct.unpack(self.table_meta.struct_format,payload)
+
+    #read varios
+    def read_many(self, offsets):
+        pages = defaultdict(list)
+
+        # agrupar offsets por página
+        for off in offsets:
+            page_id = (off - self.FILE_HEADER_SIZE) // self.PAGE_SIZE
+            pages[page_id].append(off)
+
+        results = []
+
+        with open(self.filepath, 'rb') as f:
+
+            for page_id, offs in pages.items():
+
+                f.seek(self._page_offset(page_id))
+                page_data = f.read(self.PAGE_SIZE)
+
+                for off in offs:
+                    local = off - self._page_offset(page_id)
+
+                    raw = page_data[local:local + self.RECORD_SIZE]
+                    next_free, = struct.unpack(self.RECORD_META_FORMAT, raw[:self.RECORD_META_SIZE])
+
+                    # eliminado
+                    if next_free != -1:
+                        continue
+
+                    payload = raw[self.RECORD_META_SIZE:]
+                    record = struct.unpack(self.table_meta.struct_format, payload)
+                    results.append(record)
+        return results
+
+    def _write_page(self, f, page_id, records):
+
+        f.seek(self._page_offset(page_id))
+
+        # header página
+        header = struct.pack(self.PAGE_HEADER_FORMAT, len(records))
+
+        body = []
+
+        for record_tuple in records:
+            meta = struct.pack(self.RECORD_META_FORMAT, -1)
+            payload = struct.pack(self.table_meta.struct_format, *record_tuple)
+            body.append(meta + payload)
+
+        body = b''.join(body)
+        padding = b'\x00' * (self.PAGE_SIZE - self.PAGE_HEADER_SIZE - len(body))
+
+        f.write(header +body +padding)
+
+    def _write_page_raw(self, f, page_id,page_data, num_records):
+        header = struct.pack(self.PAGE_HEADER_FORMAT, num_records)
+
+        f.seek(self._page_offset(page_id))
+        f.write(header + page_data[self.PAGE_HEADER_SIZE:])
