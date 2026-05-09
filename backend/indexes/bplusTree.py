@@ -5,12 +5,14 @@ import itertools
 from backend.catalog import TYPE_MAP
 from .base import BaseIndex
 from .heapFile import HeapFile
+from backend.external.external_sort import ExternalSort
 import csv
 
 class BPlusNode:
     HEADER_FORMAT = 'BBiii'  # node_type, is_root, num_keys, parent_ptr, next_leaf
     HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
     INT_SIZE = struct.calcsize('i')  # para punteros
+    PTR_FORMAT = 'i'
 
     def __init__(
         self,
@@ -150,8 +152,10 @@ class BPlusNode:
 class BPlusTree(BaseIndex):
     HEADER_FORMAT = 'ii'  # root_ptr, total_nodes
     HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
+    TEMP_PAGE_HEADER_FORMAT = 'i12x'
+    TEMP_PAGE_HEADER_SIZE = struct.calcsize(TEMP_PAGE_HEADER_FORMAT)
 
-    def __init__(self, table_meta, key_column, data_dir="backend/data"):
+    def __init__(self, table_meta, key_column, data_dir="backend/data", sort_buffer_size=128 * 1024 * 1024):
         super().__init__(table_meta, key_column, data_dir)
 
         # tipo de clave desde metadata
@@ -169,6 +173,7 @@ class BPlusTree(BaseIndex):
         self.key_fmt = TYPE_MAP[key_type]['fmt']
         self.key_size = TYPE_MAP[key_type]['size']
         self.key_type = key_type
+        self.sort_buffer_size = sort_buffer_size
 
         # ORDER basado en PAGE_SIZE
         self.ORDER = (self.PAGE_SIZE - BPlusNode.HEADER_SIZE - BPlusNode.INT_SIZE) // (
@@ -484,14 +489,16 @@ class BPlusTree(BaseIndex):
 
         return results
     
-    def search(self, key):
-        offsets = self.search_all(key)
+    def search(self, key_value):
+        offsets = self.search_all(key_value)
 
         if not offsets:
-            return []
+            return None
 
         records = self.heap.read_many(offsets)
-        return [self.table_meta.clean_tuple(r) for r in records]
+        if not records:
+            return None
+        return records[0]
 
     def range_search_1(self, begin_key, end_key):
         if begin_key is None or end_key is None:
@@ -532,7 +539,7 @@ class BPlusTree(BaseIndex):
             return []
 
         records = self.heap.read_many(offsets)
-        return [self.table_meta.clean_tuple(r) for r in records]
+        return records
 
 
     def insert(self, key, pointer):
@@ -1169,8 +1176,322 @@ class BPlusTree(BaseIndex):
             self._remove_from_internal(parent, index_in_parent)
             self._write_node(parent, parent_ptr)
 
+    ## para manejar  bulk_load
+    def _flush_index_page(self, f, entries):
+
+        pointer_fmt = BPlusNode.PTR_FORMAT
+        entry_format = self.key_fmt + pointer_fmt
+        packed = bytearray()
+
+        packed.extend(struct.pack(self.TEMP_PAGE_HEADER_FORMAT, len(entries)))
+
+        for key, offset in entries:
+            key = self._normalize_key_value(key)
+
+            packed.extend(struct.pack(entry_format, key, offset))
+
+        remaining = self.PAGE_SIZE - len(packed)
+
+        if remaining > 0:
+            packed.extend(b'\x00' * remaining)
+
+        f.write(packed)
+
+    def _generate_index_entries(self, rows, temp_path):
+        key_idx = None
+
+        for i, col in enumerate(self.table_meta.columns):
+            if col["name"] == self.key_column:
+                key_idx = i
+                break
+
+        pointer_fmt = BPlusNode.PTR_FORMAT
+        entry_format = self.key_fmt + pointer_fmt
+        entry_size = struct.calcsize(entry_format)
+
+        usable_bytes = self.PAGE_SIZE - self.TEMP_PAGE_HEADER_SIZE
+        max_entries = usable_bytes // entry_size
+
+        buffer = []
+
+        total_entries = 0
+
+        with open(temp_path, 'wb') as f:
+            for parsed in rows:
+                offset = self.heap.insert(tuple(parsed))
+                key = parsed[key_idx]
+                buffer.append((key, offset))
+                total_entries += 1
+
+                if len(buffer) >= max_entries:
+                    self._flush_index_page(f, buffer)
+                    buffer.clear()
+
+            if buffer:
+                self._flush_index_page(f, buffer)
+
+        return total_entries
+
+    def _iter_index_entries(self, path):
+
+        pointer_fmt = BPlusNode.PTR_FORMAT
+        entry_format = self.key_fmt + pointer_fmt
+        entry_size = struct.calcsize(entry_format)
+
+        pages_per_buffer = max(1, self.sort_buffer_size // self.PAGE_SIZE)
+        buffer_size = pages_per_buffer * self.PAGE_SIZE
+
+        with open(path, 'rb') as f:
+            while True:
+                buffer = f.read(buffer_size)
+                if not buffer:
+                    break
+                for page_start in range(0,len(buffer), self.PAGE_SIZE):
+                    page = buffer[page_start:page_start + self.PAGE_SIZE]
+
+                    if len(page) < self.PAGE_SIZE:
+                        break
+
+                    num_records = struct.unpack(self.TEMP_PAGE_HEADER_FORMAT, page[:self.TEMP_PAGE_HEADER_SIZE])[0]
+                    offset = self.TEMP_PAGE_HEADER_SIZE
+
+                    for _ in range(num_records):
+                        chunk = page[offset:offset + entry_size]
+                        if len(chunk) < entry_size:
+                            break
+                        key, ptr = struct.unpack(entry_format,chunk)
+                        yield key, ptr
+                        offset += entry_size
+
+    def _external_sort_index(self, input_path, output_path):
+        pointer_fmt = BPlusNode.PTR_FORMAT
+        entry_format = self.key_fmt + pointer_fmt
+
+        sorter = ExternalSort(record_format=entry_format,page_size=self.PAGE_SIZE, buffer_size=self.sort_buffer_size)
+
+        sorter.external_sort(heap_path=input_path,output_path=output_path,sort_key_index=0)
     
+    def _allocate_node(self):
+        root_ptr, total_nodes = self._read_header()
+        ptr = self.HEADER_SIZE + total_nodes * self.PAGE_SIZE
+        self._write_header(root_ptr,total_nodes + 1)
+        return ptr
+
+    def _build_leaf_level(self, sorted_path, total_entries):
+
+        leaf_entries = []
+        min_keys = self._min_keys_leaf()
+        remaining = total_entries
+
+        current_leaf = BPlusNode(self.key_fmt,self.key_size,self.ORDER, self.PAGE_SIZE,node_type=1)
+
+        current_offset = self._allocate_node()
+
+        prev_leaf = None
+        prev_offset = None
+
+        for key, ptr in self._iter_index_entries(sorted_path):
+            remaining_after = remaining - 1
+
+            if (current_leaf.num_keys >= self.ORDER or (remaining_after < min_keys and remaining > min_keys)):
+                if prev_leaf:
+                    prev_leaf.next_leaf = current_offset
+                    self._write_node(prev_leaf, prev_offset)
+
+                self._write_node(current_leaf, current_offset)
+
+                leaf_entries.append((current_leaf.keys[0], current_offset))
+
+                prev_leaf = current_leaf
+                prev_offset = current_offset
+
+                current_leaf = BPlusNode(self.key_fmt, self.key_size,self.ORDER, self.PAGE_SIZE, node_type=1)
+
+                current_offset = self._allocate_node()
+
+            current_leaf.keys.append(key)
+            current_leaf.pointers.append(ptr)
+
+            current_leaf.num_keys += 1
+
+            remaining -= 1
+
+        if current_leaf.num_keys > 0:
+            if prev_leaf:
+                prev_leaf.next_leaf = current_offset
+                self._write_node(prev_leaf, prev_offset)
+
+            self._write_node(current_leaf, current_offset)
+            leaf_entries.append((current_leaf.keys[0], current_offset))
+
+        return leaf_entries
+    
+    def _build_internal_level(self, level_entries):
+        parent_entries = []
+        min_children = self._min_keys_internal() + 1
+        remaining = len(level_entries)
+        current_node = BPlusNode(self.key_fmt, self.key_size, self.ORDER, self.PAGE_SIZE, node_type=0)
+        current_offset = self._allocate_node()
+        first = True
+        current_subtree_min = None
+
+        for key, ptr in level_entries:
+            remaining_after = remaining - 1
+            if (
+                current_node.num_keys >= self.ORDER or
+                (
+                    remaining_after < min_children and
+                    remaining > min_children
+                )
+            ):
+                self._write_node(current_node, current_offset)
+                parent_entries.append((current_subtree_min, current_offset))
+                current_node = BPlusNode(self.key_fmt, self.key_size, self.ORDER, self.PAGE_SIZE, node_type=0)
+                current_offset = self._allocate_node()
+                first = True
+                current_subtree_min = None
+
+            child = self._read_node(ptr)
+            child.parent_ptr = current_offset
+
+            self._write_node(child, ptr)
+            if first:
+                current_node.pointers.append(ptr)
+                current_subtree_min = key
+                first = False
+            else:
+                current_node.keys.append(key)
+                current_node.pointers.append(ptr)
+                current_node.num_keys += 1
+            remaining -= 1
+
+        if current_node.pointers:
+            self._write_node(current_node, current_offset)
+            parent_entries.append((current_subtree_min, current_offset))
+        return parent_entries
+    
+    def build_bulk_tree(self, sorted_path, total_entries):
+        level = self._build_leaf_level(sorted_path, total_entries)
+
+        while len(level) > 1:
+            level = self._build_internal_level(level)
+
+        root_key, root_ptr = level[0]
+        root = self._read_node(root_ptr)
+        root.is_root = 1
+        self._write_node(root, root_ptr)
+        _, total_nodes = self._read_header()
+        self._write_header(root_ptr, total_nodes)
+        self.root = root_ptr
+    
+
+    def _parsed_row_generator(self, rows):
+        for row in rows:
+            parsed = []
+            csv_idx = 0
+
+            for col in self.table_meta.columns:
+                col_type = col["type"].upper()
+                value = row[csv_idx].strip()
+
+                if col_type == "INT":
+                    parsed.append(int(value))
+                    csv_idx += 1
+                elif col_type == "FLOAT":
+                    parsed.append(float(value))
+                    csv_idx += 1
+                elif col_type == "VARCHAR":
+                    parsed.append(value.encode('utf-8'))
+                    csv_idx += 1
+                elif col_type == "BOOLEAN":
+                    parsed.append(value.lower() in ("true", "1"))
+                    csv_idx += 1
+                elif col_type == "DATE":
+                    parsed.append(value.encode('utf-8'))
+                    csv_idx += 1
+                elif col_type == "POINT":
+                    try:
+                        # Caso CSV real:
+                        # longitude,latitude
+                        x_val = float(row[csv_idx].strip())
+                        y_val = float(row[csv_idx + 1].strip())
+
+                        parsed.extend([x_val, y_val])
+                        csv_idx += 2
+                    except:
+                        # POINT(x,y)
+                        if value.upper().startswith("POINT"):
+                            coords = value[value.find("(")+1:value.find(")")]
+                            x, y = coords.split(",")
+                        # (x y) o (x,y)
+                        elif value.startswith("(") and value.endswith(")"):
+                            coords = value.strip("()")
+                            if "," in coords:
+                                x, y = coords.split(",")
+                            else:
+                                x, y = coords.split()
+                        # x,y
+                        elif "," in value:
+                            x, y = value.split(",")
+                        else:
+                            raise ValueError( f"Formato POINT inválido: {value}")
+
+                        parsed.extend([ float(x.strip()),float(y.strip()) ])
+                        csv_idx += 1
+                else:
+                    parsed.append(value)
+                    csv_idx += 1
+            # is_deleted
+            parsed.append(False)
+            yield parsed
+
     def bulk_load(self, csv_path, delimiter=','):
+        with open(csv_path, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.reader(f, delimiter=delimiter)
+            first_row = next(reader, None)
+
+            if first_row is None:
+                return
+
+            has_header = not self._matches_schema(first_row)
+
+            if has_header:
+                rows = reader
+            else:
+                rows = itertools.chain([first_row], reader)
+
+            parsed_rows = self._parsed_row_generator(rows)
+
+            temp_unsorted = os.path.join(self.data_dir,"tmp_unsorted.idx")
+
+            temp_sorted = os.path.join(self.data_dir,"tmp_sorted.idx")
+
+            if os.path.exists(self.filename):
+                os.remove(self.filename)
+
+            if os.path.exists(self.heap_path):
+                os.remove(self.heap_path)
+
+            with open(self.filename, 'wb') as f:
+                f.write(struct.pack(self.HEADER_FORMAT,self.HEADER_SIZE, 0))
+
+            self.heap = HeapFile(
+                table_meta=self.table_meta,
+                filepath=self.heap_path,
+                page_size=self.PAGE_SIZE
+            )
+
+            try:
+                total_entries = self._generate_index_entries( parsed_rows, temp_unsorted)
+                self._external_sort_index(temp_unsorted, temp_sorted )
+                self.build_bulk_tree( temp_sorted, total_entries)
+            finally:
+                if os.path.exists(temp_unsorted):
+                    os.remove(temp_unsorted)
+                if os.path.exists(temp_sorted):
+                    os.remove(temp_sorted)
+
+    def bulk_load_2(self, csv_path, delimiter=','):
         with open(csv_path, 'r', newline='', encoding='utf-8') as f:
 
             reader = csv.reader(f, delimiter=delimiter)
@@ -1180,76 +1501,151 @@ class BPlusTree(BaseIndex):
             if first_row is None:
                 return
 
-            header_names = [c["name"] for c in self.table_meta.columns]
-
-            has_header = set(header_names).issubset(set(first_row))
+            has_header = not self._matches_schema(first_row)
 
             if has_header:
-
-                header = first_row
-
-                column_indexes = []
-
-                for col in self.table_meta.columns:
-
-                    try:
-                        idx = header.index(col["name"])
-
-                    except ValueError:
-
-                        raise Exception(
-                            f"Columna '{col['name']}' no encontrada en CSV"
-                        )
-
-                    column_indexes.append(idx)
-
                 rows = reader
-
             else:
-
-                column_indexes = list(range(len(self.table_meta.columns)))
-
                 rows = itertools.chain([first_row], reader)
 
             for row in rows:
 
                 parsed = []
 
-                for csv_idx, col in zip(column_indexes, self.table_meta.columns):
+                csv_idx = 0
 
-                    value = row[csv_idx].strip()
+                for col in self.table_meta.columns:
 
                     col_type = col["type"].upper()
+
+                    value = row[csv_idx].strip()
 
                     if col_type == "INT":
 
                         parsed.append(int(value))
+                        csv_idx += 1
 
                     elif col_type == "FLOAT":
 
                         parsed.append(float(value))
+                        csv_idx += 1
 
                     elif col_type == "VARCHAR":
 
                         parsed.append(value.encode('utf-8'))
+                        csv_idx += 1
+
+                    elif col_type == "BOOLEAN":
+
+                        parsed.append(
+                            value.lower() in ("true", "1")
+                        )
+
+                        csv_idx += 1
+
+                    elif col_type == "DATE":
+
+                        parsed.append(
+                            value.encode('utf-8')
+                        )
+
+                        csv_idx += 1
 
                     elif col_type == "POINT":
 
-                        x, y = value.strip("()").split()
+                        try:
 
-                        parsed.extend([
-                            float(x),
-                            float(y)
-                        ])
+                            # Caso CSV real:
+                            # longitude,latitude
+
+                            x_val = float(row[csv_idx].strip())
+                            y_val = float(row[csv_idx + 1].strip())
+
+                            parsed.extend([
+                                x_val,
+                                y_val
+                            ])
+
+                            csv_idx += 2
+
+                        except:
+
+                            # Caso POINT(x,y)
+                            if value.upper().startswith("POINT"):
+
+                                coords = value[
+                                    value.find("(")+1:value.find(")")
+                                ]
+
+                                x, y = coords.split(",")
+
+                            # Caso (x y) o (x,y)
+                            elif value.startswith("(") and value.endswith(")"):
+
+                                coords = value.strip("()")
+
+                                if "," in coords:
+                                    x, y = coords.split(",")
+                                else:
+                                    x, y = coords.split()
+
+                            # Caso x,y
+                            elif "," in value:
+
+                                x, y = value.split(",")
+
+                            else:
+
+                                raise ValueError(
+                                    f"Formato POINT inválido: {value}"
+                                )
+
+                            parsed.extend([
+                                float(x.strip()),
+                                float(y.strip())
+                            ])
+
+                            csv_idx += 1
 
                     else:
 
                         parsed.append(value)
+                        csv_idx += 1
 
-                # columna oculta
+                # columna oculta is_deleted
                 parsed.append(False)
 
                 self.add(tuple(parsed), is_bulk=True)
-
+                
+    def _matches_schema(self, row):
+        try:
+            csv_idx = 0
+            for col in self.table_meta.columns:
+                col_type = col["type"].upper()
+                if col_type == "POINT":
+                    # POINT como 2 columnas CSV consecutivas
+                    float(row[csv_idx].strip())
+                    float(row[csv_idx + 1].strip())
+                    csv_idx += 2
+                else:
+                    value = row[csv_idx].strip()
+                    if col_type == "INT":
+                        int(value)
+                    elif col_type == "FLOAT":
+                        float(value)
+                    elif col_type == "BOOLEAN":
+                        if value.lower() not in (
+                            "true", "false", "0", "1"
+                        ):
+                            return False
+                    elif col_type == "DATE":
+                        pass
+                    elif col_type == "VARCHAR":
+                        pass
+                    csv_idx += 1
+            return True
+        except:
+            return False
+        
     def knn_search(self, key, k):
         raise NotImplementedError("knn_search no soportado")
