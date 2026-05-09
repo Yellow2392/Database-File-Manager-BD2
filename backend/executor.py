@@ -6,7 +6,7 @@ from backend.catalog import TableMetadata
 from backend.indexes.sequential import SequentialFile
 from backend.indexes.rtree import RTreeIndex
 from backend.indexes.hash import ExtendibleHashing
-from backend.indexes.heap import HeapFile
+from backend.indexes.heapFileIndex import HeapFile
 
 from backend.external.external_hashing import ExternalHashing
 from backend.indexes.bplusTree import BPlusTree
