@@ -15,7 +15,7 @@ const highlightSQL = (text) => {
     'SELECT', 'FROM', 'WHERE', 'INSERT', 'INTO', 'VALUES', 
     'CREATE', 'TABLE', 'DROP', 'INDEX', 'DELETE', 'RADIUS', 'POINT', 
     'IN', 'AND', 'OR', 'NOT', 'NULL', 'PRIMARY', 'KEY', 
-    'FILE', 'DELIMITER', 'BETWEEN', 'GROUP', 'BY','UPDATE', 'SET'
+    'FILE', 'DELIMITER', 'BETWEEN', 'GROUP', 'BY','UPDATE', 'SET', 'ORDER'
   ];
   
   const types = ['INT', 'VARCHAR', 'FLOAT', 'BOOLEAN', 'DATE'];

@@ -9,6 +9,7 @@ from backend.indexes.hash import ExtendibleHashing
 from backend.indexes.heapFileIndex import HeapFile
 
 from backend.external.external_hashing import ExternalHashing
+from backend.external.external_sort import ExternalSort
 from backend.indexes.bplusTree import BPlusTree
 
 from .visualizer import save_spatial_plot
@@ -273,20 +274,18 @@ class Executor:
         
         columns = [col['name'] for col in meta.columns]
         rows = []
+        raw_results_list = []
         plot_base64 = None
         total_reads = 0
         
         if cond['action'] == 'search':
             raw_result = index.search(cond['key'])
             if raw_result:
-                clean_result = meta.clean_tuple(raw_result)
-                rows.append(clean_result)
+                raw_results_list.append(raw_result)
             total_reads = index.disk_reads
             
         elif cond['action'] == 'rangeSearch':
-            raw_results = index.rangeSearch(cond['begin_key'], cond['end_key'])
-            for r in raw_results:
-                rows.append(meta.clean_tuple(r))
+            raw_results_list = index.rangeSearch(cond['begin_key'], cond['end_key'])
             total_reads = index.disk_reads
         
         elif cond['action'] in ['knn', 'range_spatial']:
@@ -295,20 +294,17 @@ class Executor:
             is_knn = (cond['action'] == 'knn')
             
             if is_knn:
-                raw_results = index.knn_search(point, param)
+                raw_results_list = index.knn_search(point, param)
             else:
-                raw_results = index.rangeSearch(point, param)
+                raw_results_list = index.rangeSearch(point, param)
             
             total_reads = getattr(index, 'disk_reads', 0)
             if hasattr(index, 'data_storage'):
                 total_reads += getattr(index.data_storage, 'disk_reads', 0)
             
-            if raw_results:
-                for r in raw_results:
-                    clean = meta.clean_tuple(r)
-                    rows.append(clean)
-                    
-                # Generacion de imagen
+            if raw_results_list:
+                clean_rows = [meta.clean_tuple(r) for r in raw_results_list]
+                
                 spatial_col_idx = 0
                 for i, col in enumerate(meta.columns):
                     if col['name'] == index.key_column:
@@ -317,20 +313,18 @@ class Executor:
                         
                 result = save_spatial_plot(
                     target_point=point, 
-                    clean_results=rows, 
+                    clean_results=clean_rows,
                     spatial_col_idx=spatial_col_idx, 
                     search_type="KNN" if is_knn else "RANGE", 
                     param=param,
-                    data_dir=self.data_dir
+                    data_dir=getattr(self, 'data_dir', 'backend/data')
                 )
                 
-                # Manejo de retorno dual: (filepath, html_string)
                 if result:
                     if isinstance(result, tuple):
                         img_path, plot_html = result
-                        plot_base64 = plot_html  # Enviamos el HTML interactivo
+                        plot_base64 = plot_html
                     else:
-                        # Compatibilidad con versiones anteriores si solo retorna filepath
                         img_path = result
                         plot_base64 = None
 
@@ -365,6 +359,40 @@ class Executor:
                 rows.append((key, count)) 
                 
             total_reads = stats["pagesread"]
+
+        if cond['action'] != 'groupby':
+            order_by_col = ast.get('order_by')
+            
+            if order_by_col and raw_results_list:
+                print(f"Ejecutando External Sort (ORDER BY) en columna: {order_by_col}...")
+                
+                sort_key_index = 0
+                for i, col in enumerate(meta.columns):
+                    if col['name'] == order_by_col:
+                        sort_key_index = i
+                        break
+                
+                temp_in = os.path.join(getattr(self, 'data_dir', 'backend/data'), "temp_order_in.dat")
+                temp_out = os.path.join(getattr(self, 'data_dir', 'backend/data'), "temp_order_out.dat")
+                
+                self._volcar_a_temporal(raw_results_list, meta, temp_in)
+                
+                sorter = ExternalSort(
+                    record_format=meta.struct_format,
+                    page_size=getattr(self, 'PAGE_SIZE', 4096),
+                    buffer_size=2 * 1024 * 1024
+                )
+                stats = sorter.external_sort(temp_in, temp_out, sort_key_index)
+                total_reads += stats['pages_read']
+                
+                raw_results_list = self._leer_desde_temporal(temp_out, meta)
+                
+                if os.path.exists(temp_in): os.remove(temp_in)
+                if os.path.exists(temp_out): os.remove(temp_out)
+
+            # clean tuple
+            for r in raw_results_list:
+                rows.append(meta.clean_tuple(r))
 
         return {
             "columns": columns,
@@ -413,3 +441,39 @@ class Executor:
         self._save_system_catalog()
         
         print(f"[OK] Tabla '{table_name}' eliminada completamente del sistema.")
+
+    def _volcar_a_temporal(self, records, meta, filepath, page_size=4096):
+        import struct
+        records_per_page = (page_size - 16) // meta.record_size
+        with open(filepath, 'wb') as f:
+            chunk = []
+            for r in records:
+                chunk.append(r)
+                if len(chunk) == records_per_page:
+                    header = struct.pack('i 12x', len(chunk))
+                    data = b''.join(struct.pack(meta.struct_format, *c) for c in chunk)
+                    padding = b'\x00' * (page_size - 16 - len(data))
+                    f.write(header + data + padding)
+                    chunk = []
+            if chunk:
+                header = struct.pack('i 12x', len(chunk))
+                data = b''.join(struct.pack(meta.struct_format, *c) for c in chunk)
+                padding = b'\x00' * (page_size - 16 - len(data))
+                f.write(header + data + padding)
+
+    def _leer_desde_temporal(self, filepath, meta, page_size=4096):
+        import struct, os
+        resultados = []
+        if not os.path.exists(filepath): return resultados
+        
+        with open(filepath, 'rb') as f:
+            while True:
+                page = f.read(page_size)
+                if not page: break
+                
+                num_records = struct.unpack('i 12x', page[:16])[0]
+                for i in range(num_records):
+                    offset = 16 + i * meta.record_size
+                    rec_bytes = page[offset : offset + meta.record_size]
+                    resultados.append(struct.unpack(meta.struct_format, rec_bytes))
+        return resultados

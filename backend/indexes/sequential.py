@@ -371,7 +371,7 @@ class SequentialFile(BaseIndex):
                             resultados.append(record_tuple)
 
         # Ordenamos porque los datos del aux_file pueden estar intercalados lógicamente
-        resultados.sort(key=lambda x: x[self.key_index])
+        #resultados.sort(key=lambda x: x[self.key_index])
         return resultados
     
     def _rebuild(self):  # Reconstruye el archivo secuencial fusionando el main y el aux sin desbordar la memoria
