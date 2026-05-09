@@ -13,7 +13,7 @@ const highlightSQL = (text) => {
 
   const keywords = [
     'SELECT', 'FROM', 'WHERE', 'INSERT', 'INTO', 'VALUES', 
-    'CREATE', 'TABLE', 'DROP', 'INDEX', 'RADIUS', 'POINT', 
+    'CREATE', 'TABLE', 'DROP', 'INDEX', 'DELETE', 'RADIUS', 'POINT', 
     'IN', 'AND', 'OR', 'NOT', 'NULL', 'PRIMARY', 'KEY', 
     'FILE', 'DELIMITER', 'BETWEEN','UPDATE', 'SET'
   ];

@@ -5,6 +5,8 @@ import json
 from backend.catalog import TableMetadata
 from backend.indexes.sequential import SequentialFile
 from backend.indexes.rtree import RTreeIndex
+from backend.indexes.hash import ExtendibleHashing
+from backend.indexes.bplusTree import BPlusTree
 
 from .visualizer import save_spatial_plot
 
@@ -62,8 +64,10 @@ class Executor:
         
         if tech == 'SEQUENTIAL':
             return SequentialFile(meta, key_column, self.data_dir)
-        #TODO: elif tech == 'HASH':
-        #TODO: elif tech == 'BTREE':
+        if tech == "HASH":                                      
+            return ExtendibleHashing(meta, key_column, self.data_dir)
+        if tech == 'BTREE':
+            return BPlusTree(meta, key_column, self.data_dir)
         if tech == 'RTREE':
             return RTreeIndex(meta, key_column, self.data_dir)
         else:
@@ -90,19 +94,28 @@ class Executor:
         meta.primary_index = primary_index
         self.catalog[table_name] = meta
         
-        print(f"[OK] Tabla {table_name} creada con índice {primary_index.__class__.__name__}.")
+        print(f"[OK] Tabla {table_name} creada con índice  {primary_index.__class__.__name__}.")
         
         self._save_system_catalog()
-
         file_path = ast.get('file')
         delimiter_char = ast.get('delimiter', ',')
+
+        total_reads = 0
+        total_writes = 0
 
         if file_path:
             full_path = os.path.join("dataset", file_path)
             if os.path.exists(full_path):
                 print(f"Delegando carga masiva a {primary_index.__class__.__name__}...")
                 
+                # Reiniciar contadores antes del bulk_load
+                primary_index.disk_reads = 0
+                primary_index.disk_writes = 0
+                
                 primary_index.bulk_load(full_path, delimiter = delimiter_char)
+                
+                total_reads = primary_index.disk_reads
+                total_writes = primary_index.disk_writes
                 
                 print(f"[OK] Carga masiva completada.")
 
@@ -110,6 +123,12 @@ class Executor:
             else:
                 print(f"[ERROR] Archivo {full_path} no encontrado.")
 
+        return {
+            "message": f"Tabla {table_name} creada correctamente.",
+            "diskReads": total_reads,
+            "diskWrites": total_writes
+        }
+        
     def execute_insert(self, ast):
         table_name = ast['table']
         if table_name not in self.catalog:
@@ -142,6 +161,12 @@ class Executor:
         
         print(f"[OK] Registro insertado exitosamente.")
         print(f"-> Accesos a disco: {index.disk_reads} reads, {index.disk_writes} writes.")
+
+        return {
+            "message": "Registro insertado exitosamente.",
+            "diskReads": index.disk_reads,
+            "diskWrites": index.disk_writes
+        }
 
     def execute_update(self, ast):
             table_name = ast['table']
@@ -201,12 +226,15 @@ class Executor:
             
             print(f"[OK] Registro con llave '{key_to_update}' actualizado con éxito.")
             print(f"-> Accesos a disco: {index.disk_reads} reads, {index.disk_writes} writes.")
-    
-    
-    
+
     def execute_delete(self, ast):
         table_name = ast['table']
-        if table_name not in self.catalog: return
+        if table_name not in self.catalog: 
+            return {
+                "message": f"La tabla {table_name} no existe.",
+                "diskReads": 0,
+                "diskWrites": 0
+            }
         
         key_to_delete = ast['condition']['key']
         index = self.catalog[table_name].primary_index
@@ -214,11 +242,20 @@ class Executor:
         index.disk_reads, index.disk_writes = 0, 0 
         
         success = index.remove(key_to_delete)
+        
         if success:
-            print(f"[OK] Registro eliminado. Reads: {index.disk_reads}, Writes: {index.disk_writes}")
+            msg = "[OK] Registro eliminado."
+            print(f"{msg} Reads: {index.disk_reads}, Writes: {index.disk_writes}")
         else:
-            print(f"[INFO] Registro con llave {key_to_delete} no encontrado.")
+            msg = f"[INFO] Registro con llave {key_to_delete} no encontrado."
+            print(msg)
 
+        return {
+            "message": msg,
+            "diskReads": index.disk_reads,
+            "diskWrites": index.disk_writes
+        }
+        
     def execute_select(self, ast):
         table_name = ast['table']
         if table_name not in self.catalog: 

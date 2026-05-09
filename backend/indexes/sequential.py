@@ -18,6 +18,12 @@ class SequentialFile(BaseIndex):
             if not os.path.exists(f):
                 open(f, 'wb').close()
         
+        self.key_index = 0
+        for i, col in enumerate(self.table_meta.columns):
+            if col['name'] == self.key_column:
+                self.key_index = i
+                break
+        
         self.total_main_records = self._count_main_records()
 
     def search(self, key_value): # Búsqueda binaria adaptada a nivel de página
@@ -51,12 +57,12 @@ class SequentialFile(BaseIndex):
                 # Primer y último registro de esta página en ram
                 first_record_data = page_data[16 : 16 + self.table_meta.record_size]
                 first_record = struct.unpack(self.table_meta.struct_format, first_record_data)
-                first_key = first_record[0] #TODO: Aquí asumo que la llave es la primera columna para simplificar. Debería soportar más que eso
+                first_key = first_record[self.key_index] 
                 
                 offset_last = 16 + ((num_records_in_page - 1) * self.table_meta.record_size)
                 last_record_data = page_data[offset_last : offset_last + self.table_meta.record_size]
                 last_record = struct.unpack(self.table_meta.struct_format, last_record_data)
-                last_key = last_record[0]
+                last_key = last_record[self.key_index]
                 
                 # Búsqueda binaria a través de pagina
                 if key_value < first_key:
@@ -72,7 +78,7 @@ class SequentialFile(BaseIndex):
                         
                         # Extraemos el booleano is_deleted (asumiendo que es el último elemento de la tupla)
                         is_deleted = record_tuple[-1] 
-                        record_key = record_tuple[0]
+                        record_key = record_tuple[self.key_index]
                         
                         if record_key == key_value and not is_deleted:
                             return record_tuple
@@ -102,7 +108,7 @@ class SequentialFile(BaseIndex):
                     record_bytes = page_data[offset : offset + self.table_meta.record_size]
                     record_tuple = struct.unpack(self.table_meta.struct_format, record_bytes)
                     
-                    if record_tuple[0] == key_value and not record_tuple[-1]:
+                    if record_tuple[self.key_index] == key_value and not record_tuple[-1]:
                         return record_tuple
         return None
     
@@ -217,9 +223,9 @@ class SequentialFile(BaseIndex):
                     num_records = struct.unpack('i 12x', page_data[:16])[0]
                     if num_records == 0: break
                     
-                    first_key = struct.unpack(self.table_meta.struct_format, page_data[16 : 16 + self.table_meta.record_size])[0]
+                    first_key = struct.unpack(self.table_meta.struct_format, page_data[16 : 16 + self.table_meta.record_size])[self.key_index]
                     last_offset = 16 + ((num_records - 1) * self.table_meta.record_size)
-                    last_key = struct.unpack(self.table_meta.struct_format, page_data[last_offset : last_offset + self.table_meta.record_size])[0]
+                    last_key = struct.unpack(self.table_meta.struct_format, page_data[last_offset : last_offset + self.table_meta.record_size])[self.key_index]
                     
                     if key_value < first_key:
                         u = mid - 1
@@ -296,11 +302,11 @@ class SequentialFile(BaseIndex):
                     
                     offset_first = 16
                     first_record = struct.unpack(self.table_meta.struct_format, page_data[offset_first : offset_first + self.table_meta.record_size])
-                    first_key = first_record[0]
+                    first_key = first_record[self.key_index]
                     
                     offset_last = 16 + ((num_records - 1) * self.table_meta.record_size)
                     last_record = struct.unpack(self.table_meta.struct_format, page_data[offset_last : offset_last + self.table_meta.record_size])
-                    last_key = last_record[0]
+                    last_key = last_record[self.key_index]
                     
                     if last_key < begin_key:
                         low = mid + 1
@@ -331,7 +337,7 @@ class SequentialFile(BaseIndex):
                         record_bytes = page_data[offset : offset + self.table_meta.record_size]
                         record_tuple = struct.unpack(self.table_meta.struct_format, record_bytes)
                         
-                        key = record_tuple[0]
+                        key = record_tuple[self.key_index]
                         is_deleted = record_tuple[-1]
                         
                         if key > end_key:
@@ -358,14 +364,14 @@ class SequentialFile(BaseIndex):
                         record_bytes = page_data[offset : offset + self.table_meta.record_size]
                         record_tuple = struct.unpack(self.table_meta.struct_format, record_bytes)
                         
-                        key = record_tuple[0]
+                        key = record_tuple[self.key_index]
                         is_deleted = record_tuple[-1]
                         
                         if not is_deleted and begin_key <= key <= end_key:
                             resultados.append(record_tuple)
 
         # Ordenamos porque los datos del aux_file pueden estar intercalados lógicamente
-        resultados.sort(key=lambda x: x[0])
+        resultados.sort(key=lambda x: x[self.key_index])
         return resultados
     
     def _rebuild(self):  # Reconstruye el archivo secuencial fusionando el main y el aux sin desbordar la memoria
@@ -383,7 +389,7 @@ class SequentialFile(BaseIndex):
             page_size=self.PAGE_SIZE, 
             buffer_size=2 * 1024 * 1024 
         )
-        sorter.external_sort(temp_heap_file, self.main_file, sort_key_index=0)
+        sorter.external_sort(temp_heap_file, self.main_file, sort_key_index=self.key_index)
         
         os.remove(temp_heap_file)
         open(self.aux_file, 'wb').close() 
@@ -417,8 +423,7 @@ class SequentialFile(BaseIndex):
             buffer_size=2 * 1024 * 1024  # 2 MB de memoria RAM al buffer
         )
         
-        #TODO: Asumimos que la llave primaria es la columna 0. Si no, calculalo dinámicamente.
-        stats = sorter.external_sort(temp_heap_file, self.main_file, sort_key_index=0)
+        stats = sorter.external_sort(temp_heap_file, self.main_file, sort_key_index=self.key_index)
         
         os.remove(temp_heap_file)
         open(self.aux_file, 'wb').close() # El auxiliar empieza vacío

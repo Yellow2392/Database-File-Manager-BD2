@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  backend:
+    build: 
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: db_backend
+    ports:
+      - "8000:8000"
+    volumes:
+      # Montamos la carpeta local data y datasets para que persistan y puedan ser leídos/escritos
+      - ./backend/data:/app/backend/data
+      - ./dataset:/app/dataset
+    # Evitar problemas si el frontend trata de comunicarse antes de que el backend inicie
+    restart: always
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: db_frontend
+    ports:
+      - "5173:80"
+    environment:
+      # Si el frontend necesita saber la URL del backend, la agregas aquí:
+      - VITE_API_URL=http://localhost:8000
+    depends_on:
+      - backend
