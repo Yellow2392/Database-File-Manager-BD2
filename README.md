@@ -5,9 +5,9 @@
 **Integrantes:**
 - Sebastian Romero Pahuara (sebastianromero07)
 - Jorge Sebastian Tenorio Romero (Yellow2392)
-- [Nombre Integrante 3]
-- [Nombre Integrante 4]
-- [Nombre Integrante 5]
+- Carlos Alberto Villegas Arce
+- Llorent Eloy Nunayalle Brañes
+- Paris Lenard Herrera Torres
 
 ---
 
