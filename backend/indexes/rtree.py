@@ -41,7 +41,8 @@ class RTreeIndex(BaseIndex):
         self.tree_file = os.path.join(self.data_dir, f"{table_meta.name}_rtree.dat")
         
         # El sequential manejará los datos pesados
-        self.data_storage = SequentialFile(table_meta, key_column, data_dir)
+        pk_column_name = table_meta.columns[0]['name']
+        self.data_storage = SequentialFile(table_meta, pk_column_name, data_dir)
         
         self.header_fmt = '=? i 11x' 
         # min_x, min_y, max_x, max_y (4 floats = 16 bytes) + pointer (1 int = 4 bytes)
