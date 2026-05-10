@@ -97,13 +97,21 @@ Este método se implementó en dos formas, siendo una versión adaptada para el 
 ## 3. Análisis Teórico Comparativo de Accesos a Disco
 En base a la teoría y tamaño de página constante establecido (ej. 4 KB):
 
-| Operación | Sequential File (Teórico) | R-Tree (Teórico) |
-| :--- | :---: | :---: |
-| **Búsqueda Puntual** | $O(\log_2 b)$ main + aux | $O(\log_m n)$ |
-| **Búsqueda x Rango** | $O(\log_2 b + \frac{k}{r})$ | $O(\log_m n + C)$ |
-| **Inserción** | $O(1)$ (en Aux log) | $O(\log_m n)$ o Split |
+| Operación | Sequential File | Extendible Hashing | B+ Tree (Unclustered) | R-Tree |
+| --- | --- | --- | --- | --- |
+| **Búsqueda Puntual** | $O(\log_2 b)$ main + aux | $O(1)$ | $O(\log_m n + 1)$ | $O(\log_m n)$ |
+| **Búsqueda x Rango** | $O(\log_2 b + \frac{k}{r})$ | $O(b)$ (Scan Completo) | $O(\log_m n + k)$ | $O(\log_m n + C)$ |
+| **Búsqueda KNN** | N/A | N/A | N/A | $O(\log_m n + K)$ |
+| **Inserción** | $O(1)$ (en Aux log) | $O(1)$ amortizado | $O(\log_m n)$ o Split | $O(\log_m n)$ o Split |
 
-*Donde:* $n$ es la cantidad de registros poblados, $b$ es la cantidad de bloques en disco, $m$ constante de partición del árbol.  
+*Donde:* $n$ es la cantidad de registros poblados.
+
+* $b$ es la cantidad de bloques o páginas en el archivo físico.
+* $m$ es el *fanout* o constante de partición de los árboles.
+* $k$ es el número de registros que cumplen la condición del rango.
+* $r$ es el *blocking factor* (cantidad de registros que caben por página de disco).
+* $C$ representa los bloques adicionales solapados espacialmente.
+* $K$ representa la cantidad de vecinos más cercanos requeridos.
 
 ### Explicación Teórica de las Complejidades de Acceso a Disco
 
@@ -111,15 +119,35 @@ A continuación, se detalla la justificación teórica de las complejidades pres
 
 #### 1. Archivo Secuencial (Sequential File)
 La arquitectura de esta técnica se divide en un archivo principal ordenado y un archivo auxiliar desordenado para desbordamientos temporales.
-* **Búsqueda Puntual — O(log_2 b) main + aux:** Dado que el archivo principal (main) mantiene un orden físico secuencial, el motor de base de datos puede aplicar una búsqueda binaria a nivel de bloques. Esto garantiza encontrar la página deseada en log_2 b lecturas. Si el registro se insertó recientemente y no está en el archivo principal, se suma el costo de escanear el archivo auxiliar.
-* **Búsqueda por Rango — O(log_2 b + k/r):** Inicia con una búsqueda binaria O(log_2 b) para localizar el primer bloque donde comienza la condición del rango. A partir de ese punto, aprovecha el orden físico del disco para leer secuencialmente. El término k/r es el costo de recuperación secuencial, donde 'k' representa la cantidad de registros que cumplen la condición y 'r' es el *blocking factor* (cuántos registros caben en una página).
-* **Inserción — O(1) (en Aux log):** Para evitar el costo prohibitivo de desplazar bytes en el archivo principal ordenado, las nuevas inserciones operan como un simple *append* (agregar al final) en el archivo auxiliar. Esto requiere un único acceso de escritura, garantizando tiempo constante.
 
-#### 2. R-Tree (Estructura Jerárquica Multidimensional)
-Las estructuras de indexación en árbol balanceadas basan su costo en la profundidad de navegación (altura del árbol).
-* **Búsqueda Puntual — O(log_m n):** La complejidad está directamente definida por la altura del árbol. El motor debe descender desde el nodo raíz hasta llegar al nodo hoja correcto (o Minimum Bounding Box aplicable). Cada salto de nivel implica leer una página de disco. La base del logaritmo 'm' (*fanout*) reduce drásticamente la altura del árbol, manteniendo los accesos muy bajos incluso con millones de datos (n).
-* **Búsqueda por Rango / Espacial — O(log_m n + C):** Requiere el mismo descenso inicial O(log_m n) para encontrar el límite inicial del rango o el área de interés. El término 'C' representa las lecturas extra necesarias para recorrer las hojas adyacentes o las cajas espaciales solapadas que contienen el resto de los resultados de la consulta.
-* **Inserción — O(log_m n) o Split:** El sistema invierte log_m n lecturas para descender hasta la página hoja que debe contener el nuevo registro y realiza la escritura. Si esa página ya alcanzó su límite de capacidad máxima, se desencadena un *Split* (división del nodo). Este fenómeno requiere escribir una nueva página en el disco duro y propagar la actualización de punteros hacia arriba, lo que suma accesos físicos adicionales en ese instante específico.
+* **Búsqueda Puntual — $O(\log_2 b)$ main + aux:** Dado que el archivo principal (main) mantiene un orden físico secuencial, el motor de base de datos puede aplicar una búsqueda binaria a nivel de bloques. Esto garantiza encontrar la página deseada en $\log_2 b$ lecturas. Si el registro se insertó recientemente y no está en el archivo principal, se suma el costo de escanear el archivo auxiliar.
+* **Búsqueda por Rango — $O(\log_2 b + \frac{k}{r})$:** Inicia con una búsqueda binaria $O(\log_2 b)$ para localizar el primer bloque donde comienza la condición del rango. A partir de ese punto, aprovecha el orden físico del disco para leer secuencialmente. El término $\frac{k}{r}$ es el costo de recuperación secuencial, minimizando las lecturas a disco.
+* **Inserción — $O(1)$ (en Aux log):** Para evitar el costo prohibitivo de desplazar bytes en el archivo principal ordenado, las nuevas inserciones operan como un simple *append* (agregar al final) en el archivo auxiliar. Esto requiere un único acceso de escritura, garantizando tiempo constante.
+
+#### 2. Hashing Extensible (Extendible Hashing)
+
+Estructura de indexación dinámica que separa un directorio liviano almacenado en memoria RAM de las cubetas de datos (buckets) almacenadas en el disco duro.
+
+* **Búsqueda Puntual — $O(1)$:** El directorio se mantiene en memoria principal. Al aplicar la función hash sobre la llave y evaluar sus bits menos significativos (Global Depth), se obtiene inmediatamente el puntero físico exacto de la página. Esto garantiza recuperar cualquier registro con exactamente 1 acceso de lectura a disco.
+* **Búsqueda por Rango — $O(b)$:** Debido a la naturaleza determinista de la función hash, el orden lógico secuencial de las llaves se destruye completamente. Intentar localizar un rango obliga al motor a abandonar el índice y realizar un recorrido bloque por bloque por todo el archivo de datos (*Full Table Scan*), resultando en un costo lineal respecto a la cantidad de páginas.
+* **Inserción — $O(1)$ amortizado:** El acceso directo permite escribir el nuevo registro leyendo y reescribiendo una sola página. En escenarios de colisión donde la página se llena (Overflow), el algoritmo aplica un *Split* creando una nueva página y reorganizando los punteros del directorio localmente. Aunque este evento dispara la lectura/escritura de un bloque adicional, el costo se mantiene acotado e independiente de la cantidad total de datos ($n$).
+
+#### 3. Árbol B+ (No Agrupado / Unclustered Index)
+
+Estructura de árbol jerárquico balanceado donde los datos físicos residen en un archivo separado no ordenado (Heap File), y el árbol solo almacena las llaves y los punteros lógicos hacia los registros.
+
+* **Búsqueda Puntual — $O(\log_m n + 1)$:** El motor invierte $\log_m n$ lecturas a disco para descender por las páginas del árbol (desde la raíz hasta el nodo hoja). Al encontrar la llave en la hoja, se requiere exactamente $+1$ acceso extra al disco para seguir el puntero y extraer la fila completa del archivo Heap.
+* **Búsqueda por Rango — $O(\log_m n + k)$:** Tras descender $\log_m n$ niveles para encontrar la primera llave del rango, se aprovecha la lista enlazada en el nivel hoja del B+ Tree para encontrar los $k$ punteros correspondientes de forma casi inmediata. Sin embargo, dado que el índice es *No Agrupado*, cada uno de los $k$ registros referenciados reside en posiciones dispersas y aleatorias del disco. Esto obliga a realizar hasta $k$ accesos de lectura puramente aleatoria (*Random I/O*), siendo considerablemente más ineficiente que la búsqueda secuencial agrupada.
+* **Inserción — $O(\log_m n)$ o Split:** Involucra el descenso habitual para encontrar la posición correcta en el nivel hoja, más la escritura en el archivo Heap. Mantener el balanceo del árbol garantiza esta complejidad, asumiendo costos ocasionales extra de I/O cuando un nodo se llena y el *Split* se propaga hacia arriba.
+
+#### 4. R-Tree (Estructura Jerárquica Espacial)
+
+Las estructuras de indexación multidimensionales basan su costo en la profundidad de navegación y en las heurísticas de cruce geométrico.
+
+* **Búsqueda Puntual — $O(\log_m n)$:** La complejidad está directamente definida por la altura del árbol. El motor desciende abriendo la rama cuyo *Minimum Bounding Box* contenga el punto objetivo. La base del logaritmo $m$ reduce drásticamente la altura del árbol.
+* **Búsqueda por Rango Espacial — $O(\log_m n + C)$:** Requiere el mismo descenso inicial para detectar colisiones con el área de consulta. El término $C$ representa la penalidad por superposición (*Overlap*); indica las lecturas adicionales obligatorias para recorrer cajas limítrofes adyacentes que también colisionan con el radio o polígono evaluado.
+* **Búsqueda KNN (K-Nearest Neighbors) — $O(\log_m n + K)$:** Implementada generalmente mediante una cola de prioridad basada en el algoritmo *Best-First Search*. Al explorar primero las páginas espaciales que presentan la distancia mínima al punto de consulta, el motor descarta la lectura de ramas lejanas del árbol. El costo es proporcional a la altura del árbol y a la extracción de los $K$ nodos hoja más cercanos en el disco.
+* **Inserción — $O(\log_m n)$ o Split:** El sistema invierte el descenso logarítmico para elegir la página hoja que requiera el menor ensanchamiento de su caja contenedora. Si la página excede su capacidad máxima, se ejecuta un *Split* espacial (algoritmos Lineal, Cuadrático o R*), requiriendo escrituras físicas adicionales para balancear y recalcular el perímetro de los ancestros.
 
 ---
 
