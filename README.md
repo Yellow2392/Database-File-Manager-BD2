@@ -4,10 +4,10 @@
 **Institución:** Universidad de Ingeniería y Tecnología (UTEC)  
 **Integrantes:**
 - Sebastian Romero Pahuara
-- [Nombre Integrante 2]
-- [Nombre Integrante 3]
-- [Nombre Integrante 4]
-- [Nombre Integrante 5]
+- Jorge Sebastian Tenorio Romero
+- Paris Lenard Herrera Torres
+- Llorent Eloy Nunayalle Brañes
+- Carlos Alberto Villegas Arce
 
 ---
 
@@ -21,6 +21,7 @@ Para interactuar con el sistema, se ha desarrollado un **Parser y Lexer SQL prop
 *   **Índice Espacial (R-Tree):** Para la indexación de coordenadas y polígonos, que brinda soporte a consultas espaciales nativas como K-Nearest Neighbors (KNN) y búsquedas geográficas por radio.
 
 El sistema también cuenta con un simulador de **Gestor de Transacciones Concurrente (Isolation Manager)** manejado por *locks* a nivel de registro para prevenir colisiones asíncronas. El propósito final del informe es contrastar el rendimiento teórico (Notación Big O) frente a los resultados prácticos, midiendo el conteo exacto de accesos a páginas físicas en disco (*disk reads/writes*) y los tiempos reales de ejecución.
+
 ---
 
 ## 2. Descripción de Técnicas y Algoritmos Implementados
@@ -97,25 +98,80 @@ Para poder interactuar con las estructuras desde sentencias abstractas, se desar
 ---
 
 ## 5. Resultados Experimentales y Discusión
-Para los experimentos se usó el dataset público de *Yellow Tripdata de Nueva York (2016)* con N = 1 000, 10 000 y 100 000.
 
-### Métricas Obtenidas
-*(Insertar una tabla con los resultados empíricos)*
+**Tabla 1: Operación de Inserción**
+| Técnica | Tamaño (N) | Accesos a Disco (Reads + Writes) | Tiempo de Ejecución (ms) |
+| :--- | :---: | :---: | :---: |
+| **Sequential File** | 1,000 | 2 | 196.05 |
+| | 10,000 | 2 | 227.91 |
+| | 100,000 | 2 | 749.85 |
+| **B+ Tree** | 1,000 | 3 | 193.37 |
+| | 10,000 | 3 | 256.54 |
+| | 100,000 | 3 | 781.80 |
+| **Extendible Hashing** | 1,000 | 5 | 197.05 |
+| | 10,000 | 2 | 302.18 |
+| | 100,000 | 2 | 817.00 |
 
-### Gráficos
-- **[Insertar gráfico comparativo de Tiempos (ms)]**
-- **[Insertar gráfico comparativo de Accesos a Disco (reads/writes)]**
+**Tabla 2: Búsqueda Puntual (Point Query)**
+| Técnica | Tamaño (N) | Accesos a Disco (Páginas) | Tiempo de Ejecución (ms) |
+| :--- | :---: | :---: | :---: |
+| **Sequential File** | 1,000 | 1 | 290.61 |
+| | 10,000 | 10 | 234.42 |
+| | 100,000 | 13 | 736.31 |
+| **B+ Tree** | 1,000 | 2 | 195.68 |
+| | 10,000 | 2 | 247.56 |
+| | 100,000 | 2 | 824.33 |
+| **Extendible Hashing** | 1,000 | 1 | 179.18 |
+| | 10,000 | 1 | 273.95 |
+| | 100,000 | 1 | 766.55 |
 
-### Discusión
-*(Analizar si los resultados escalaron de manera equivalente a la teoría O(N) colocada en el Punto 3, y dar conclusiones)*
+**Tabla 3: Búsqueda por Rango (Range Query)**
+| Técnica | Tamaño (N) | Accesos a Disco (Páginas) | Tiempo de Ejecución (ms) |
+| :--- | :---: | :---: | :---: |
+| **Sequential File** | 1,000 | 14 | 237.06 |
+| | 10,000 | 19 | 242.98 |
+| | 100,000 | 21 | 840.50 |
+| **B+ Tree** | 1,000 | 2 | 203.48 |
+| | 10,000 | 2 | 246.89 |
+| | 100,000 | 2 | 752.56 |
 
+*Nota: El Extendible Hashing no se incluye en esta tabla ya que su arquitectura no soporta búsquedas por rango de forma nativa.*
+
+**Tabla 4: Consultas Espaciales (R-Tree)**
+| Operación | Tamaño (N) | Accesos a Disco (Páginas) | Tiempo de Ejecución (ms) |
+| :--- | :---: | :---: | :---: |
+| **Búsqueda por Radio** | 1,000 | 1,704 | 915.91 |
+| | 10,000 | 42,481 | 12,009.56 |
+| | 100,000 | 468,296 | 120,193.01 |
+| **K-Nearest Neighbors (KNN)**| 1,000 | 84 | 274.20 |
+| | 10,000 | 129 | 425.97 |
+| | 100,000 | 179 | 1,479.87 |
+
+
+### 5.3. Discusión y Correspondencia Teórica
+
+Al analizar los resultados empíricos frente al tamaño del dataset (N), comprobamos el cumplimiento de la complejidad teórica esperada para cada técnica:
+
+1. **Eficiencia Constante del Extendible Hashing $O(1)$:** Nuestros datos demuestran que, sin importar si el dataset tiene 1,000 o 100,000 registros, la búsqueda puntual en el Hash siempre requirió exactamente **1 acceso a disco**. Esto valida empíricamente su diseño de mapeo directo por directorio. Los picos observados en la inserción (5 accesos en 1K) se deben a los *splits* dinámicos de los buckets.
+
+2. **Crecimiento Logarítmico del B+ Tree $O(\log_m n)$:**
+El árbol B+ demostró ser la estructura más estable. Las búsquedas puntuales se mantuvieron fijas en **2 accesos a disco** para todos los tamaños de N. Esto indica que el árbol está perfectamente balanceado y que su altura no superó los 2 niveles incluso con 100K registros, aprovechando eficientemente el *Page Size*.
+
+3. **Degradación del Sequential File:**
+Como dicta la teoría, la búsqueda binaria del archivo secuencial $O(\log_2 b)$ se degrada conforme crece el archivo. Observamos que los accesos a disco en búsquedas puntuales subieron progresivamente de 1 (en 1K) a 10 (en 10K) y hasta 13 páginas (en 100K), haciéndolo el método menos eficiente para consultas directas en grandes volúmenes comparado con Hash y B+ Tree.
+
+4. **Escalabilidad del R-Tree (KNN vs Radio):**
+El R-Tree arrojó un contraste interesante. La búsqueda de vecinos más cercanos (KNN) escaló de maravilla, pasando de 84 accesos a solo 179 accesos al multiplicar los datos por 100. Sin embargo, la búsqueda por Radio sufrió una explosión combinatoria en 100K (llegando a 468,296 lecturas y 120 segundos). Esto evidencia que con un radio estático muy grande en un área densamente poblada (taxis en NY), el R-Tree se ve forzado a recuperar casi todas las hojas, comportándose como un *Full Scan*.
 ---
 
 ## 6. Interfaz Gráfica (GUI)
 *(Colocar capturas de pantalla de la aplicación ejecutándose)*
 - **Captura 1:** Pantalla principal y carga (CREATE).
+![Create Table](./images/create-image.png "Create Table")
 - **Captura 2:** Realizando una búsqueda SELECT y mostrando tabla de resultados y conteo de páginas de disco y tiempo.
+![Select Query](./images/select-image.png "Select Query")
 - **Captura 3:** Visualización del plot Geoespacial.
+![consultaRtree](./images/consulta-Rtree.png "Rtree Query")
 
 ---
 
