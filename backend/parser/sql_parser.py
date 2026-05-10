@@ -137,6 +137,22 @@ class DBMSSqlParser:
         self.match('FROM')
         
         table_name = self.match('ID').value
+
+        op_token = self.current_token()
+        if op_token and op_token.type == 'GROUP':
+            self.match('GROUP')
+            self.match('BY')
+            group_column = self.match('ID').value
+            self.match('SYMBOL', ';')
+            
+            return {
+                "statement": "SELECT",
+                "table": table_name,
+                "condition": {
+                    "action": "groupby",
+                    "column": group_column
+                }
+            }
         
         self.match('WHERE')
         column_name = self.match('ID').value
@@ -173,11 +189,19 @@ class DBMSSqlParser:
                 raise SyntaxError("Se esperaba K o RADIUS en la consulta espacial.")
                 
             self.match('SYMBOL', ')')
+
+            order_by_col = None
+            if self.current_token() and self.current_token().type == 'ORDER':
+                self.match('ORDER')
+                self.match('BY')
+                order_by_col = self.match('ID').value
+
             self.match('SYMBOL', ';')
             
             return {
                 "statement": "SELECT",
                 "table": table_name,
+                "order_by": order_by_col,
                 "condition": {
                     "action": action,
                     "column": column_name,
@@ -188,6 +212,12 @@ class DBMSSqlParser:
         
         # Análisis de condición a otra regla
         condition_ast = self.parse_condition(column_name)
+
+        order_by_col = None
+        if self.current_token() and self.current_token().type == 'ORDER':
+            self.match('ORDER')
+            self.match('BY')
+            order_by_col = self.match('ID').value
         
         self.match('SYMBOL', ';') # Condición de final de sentencia
         
@@ -195,6 +225,7 @@ class DBMSSqlParser:
         ast = {
             "statement": "SELECT",
             "table": table_name,
+            "order_by": order_by_col,
             "condition": condition_ast
         }
         return ast
