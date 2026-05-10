@@ -103,6 +103,7 @@ En base a la teoría y tamaño de página constante establecido (ej. 4 KB):
 | **Búsqueda x Rango** | $O(\log_2 b + \frac{k}{r})$ | $O(b)$ (Scan Completo) | $O(\log_m n + k)$ | $O(\log_m n + C)$ |
 | **Búsqueda KNN** | N/A | N/A | N/A | $O(\log_m n + K)$ |
 | **Inserción** | $O(1)$ (en Aux log) | $O(1)$ amortizado | $O(\log_m n)$ o Split | $O(\log_m n)$ o Split |
+| **Eliminación** | $O(\log_2 b)$ + 1 write | $O(1)$ amortizado | $O(\log_m n)$ o Merge | $O(\log_m n)$ o Condense |
 
 *Donde:* $n$ es la cantidad de registros poblados.
 
@@ -123,6 +124,7 @@ La arquitectura de esta técnica se divide en un archivo principal ordenado y un
 * **Búsqueda Puntual — $O(\log_2 b)$ main + aux:** Dado que el archivo principal (main) mantiene un orden físico secuencial, el motor de base de datos puede aplicar una búsqueda binaria a nivel de bloques. Esto garantiza encontrar la página deseada en $\log_2 b$ lecturas. Si el registro se insertó recientemente y no está en el archivo principal, se suma el costo de escanear el archivo auxiliar.
 * **Búsqueda por Rango — $O(\log_2 b + \frac{k}{r})$:** Inicia con una búsqueda binaria $O(\log_2 b)$ para localizar el primer bloque donde comienza la condición del rango. A partir de ese punto, aprovecha el orden físico del disco para leer secuencialmente. El término $\frac{k}{r}$ es el costo de recuperación secuencial, minimizando las lecturas a disco.
 * **Inserción — $O(1)$ (en Aux log):** Para evitar el costo prohibitivo de desplazar bytes en el archivo principal ordenado, las nuevas inserciones operan como un simple *append* (agregar al final) en el archivo auxiliar. Esto requiere un único acceso de escritura, garantizando tiempo constante.
+* **Eliminación — $O(\log_2 b)$ + 1 write:** Utiliza la estrategia de eliminación lógica (marcadores *tombstone*). Primero, invierte el costo de la búsqueda binaria para localizar la página contenedora. Una vez en memoria, se actualiza la bandera de eliminación (ej. `is_deleted = True`) y se requiere exactamente 1 acceso físico de escritura para reescribir la página actualizada en el disco.
 
 #### 2. Hashing Extensible (Extendible Hashing)
 
@@ -131,14 +133,16 @@ Estructura de indexación dinámica que separa un directorio liviano almacenado 
 * **Búsqueda Puntual — $O(1)$:** El directorio se mantiene en memoria principal. Al aplicar la función hash sobre la llave y evaluar sus bits menos significativos (Global Depth), se obtiene inmediatamente el puntero físico exacto de la página. Esto garantiza recuperar cualquier registro con exactamente 1 acceso de lectura a disco.
 * **Búsqueda por Rango — $O(b)$:** Debido a la naturaleza determinista de la función hash, el orden lógico secuencial de las llaves se destruye completamente. Intentar localizar un rango obliga al motor a abandonar el índice y realizar un recorrido bloque por bloque por todo el archivo de datos (*Full Table Scan*), resultando en un costo lineal respecto a la cantidad de páginas.
 * **Inserción — $O(1)$ amortizado:** El acceso directo permite escribir el nuevo registro leyendo y reescribiendo una sola página. En escenarios de colisión donde la página se llena (Overflow), el algoritmo aplica un *Split* creando una nueva página y reorganizando los punteros del directorio localmente. Aunque este evento dispara la lectura/escritura de un bloque adicional, el costo se mantiene acotado e independiente de la cantidad total de datos ($n$).
+* **Eliminación — $O(1)$ amortizado:** Implica la lectura $O(1)$ de la cubeta objetivo y su respectiva reescritura tras omitir el registro. Si la página queda subutilizada, el algoritmo evalúa a la "cubeta hermana" (Buddy Bucket). Si la suma de registros de ambas cabe en una sola página, se realiza una fusión (Merge) y una posible reducción del directorio (Shrink), requiriendo lecturas/escrituras extra limitadas a ese par de bloques.
 
 #### 3. Árbol B+ (No Agrupado / Unclustered Index)
 
 Estructura de árbol jerárquico balanceado donde los datos físicos residen en un archivo separado no ordenado (Heap File), y el árbol solo almacena las llaves y los punteros lógicos hacia los registros.
 
 * **Búsqueda Puntual — $O(\log_m n + 1)$:** El motor invierte $\log_m n$ lecturas a disco para descender por las páginas del árbol (desde la raíz hasta el nodo hoja). Al encontrar la llave en la hoja, se requiere exactamente $+1$ acceso extra al disco para seguir el puntero y extraer la fila completa del archivo Heap.
-* **Búsqueda por Rango — $O(\log_m n + k)$:** Tras descender $\log_m n$ niveles para encontrar la primera llave del rango, se aprovecha la lista enlazada en el nivel hoja del B+ Tree para encontrar los $k$ punteros correspondientes de forma casi inmediata. Sin embargo, dado que el índice es *No Agrupado*, cada uno de los $k$ registros referenciados reside en posiciones dispersas y aleatorias del disco. Esto obliga a realizar hasta $k$ accesos de lectura puramente aleatoria (*Random I/O*), siendo considerablemente más ineficiente que la búsqueda secuencial agrupada.
+* **Búsqueda por Rango — $O(\log_m n + k)$:** Tras descender $\log_m n$ niveles para encontrar la primera llave del rango, se aprovecha la lista enlazada en el nivel hoja del B+ Tree para encontrar los $k$ punteros correspondientes de forma casi inmediata. Sin embargo, dado que el índice es *No Agrupado*, cada uno de los $k$ registros referenciados reside en posiciones dispersas y aleatorias del disco. Esto obliga a realizar hasta $k$ accesos de lectura puramente aleatoria (*Random I/O*).
 * **Inserción — $O(\log_m n)$ o Split:** Involucra el descenso habitual para encontrar la posición correcta en el nivel hoja, más la escritura en el archivo Heap. Mantener el balanceo del árbol garantiza esta complejidad, asumiendo costos ocasionales extra de I/O cuando un nodo se llena y el *Split* se propaga hacia arriba.
+* **Eliminación — $O(\log_m n)$ o Merge:** Tras ubicar y remover la llave en el nivel hoja, el sistema debe comprobar el factor de carga mínimo. Si el nodo queda con menos de $\lceil m/2 \rceil$ entradas, se produce un préstamo (Redistribución) de un nodo hermano o una fusión (Merge). Estas operaciones estructurales pueden propagarse en cascada hasta la raíz, generando un costo transitorio de escrituras en disco.
 
 #### 4. R-Tree (Estructura Jerárquica Espacial)
 
@@ -146,8 +150,9 @@ Las estructuras de indexación multidimensionales basan su costo en la profundid
 
 * **Búsqueda Puntual — $O(\log_m n)$:** La complejidad está directamente definida por la altura del árbol. El motor desciende abriendo la rama cuyo *Minimum Bounding Box* contenga el punto objetivo. La base del logaritmo $m$ reduce drásticamente la altura del árbol.
 * **Búsqueda por Rango Espacial — $O(\log_m n + C)$:** Requiere el mismo descenso inicial para detectar colisiones con el área de consulta. El término $C$ representa la penalidad por superposición (*Overlap*); indica las lecturas adicionales obligatorias para recorrer cajas limítrofes adyacentes que también colisionan con el radio o polígono evaluado.
-* **Búsqueda KNN (K-Nearest Neighbors) — $O(\log_m n + K)$:** Implementada generalmente mediante una cola de prioridad basada en el algoritmo *Best-First Search*. Al explorar primero las páginas espaciales que presentan la distancia mínima al punto de consulta, el motor descarta la lectura de ramas lejanas del árbol. El costo es proporcional a la altura del árbol y a la extracción de los $K$ nodos hoja más cercanos en el disco.
+* **Búsqueda KNN (K-Nearest Neighbors) — $O(\log_m n + K)$:** Implementada generalmente mediante una cola de prioridad basada en el algoritmo *Best-First Search*. Al explorar primero las páginas espaciales que presentan la distancia mínima al punto de consulta, el motor descarta la lectura de ramas lejanas del árbol.
 * **Inserción — $O(\log_m n)$ o Split:** El sistema invierte el descenso logarítmico para elegir la página hoja que requiera el menor ensanchamiento de su caja contenedora. Si la página excede su capacidad máxima, se ejecuta un *Split* espacial (algoritmos Lineal, Cuadrático o R*), requiriendo escrituras físicas adicionales para balancear y recalcular el perímetro de los ancestros.
+* **Eliminación — $O(\log_m n)$ o Condense:** Localizar el punto espacial consume $O(\log_m n)$. Tras removerlo, a diferencia del B+ Tree donde se pide prestado a los hermanos, en el R-Tree si un nodo sufre *Underflow*, típicamente es eliminado por completo. Sus entradas huérfanas se reinsertan desde la raíz y los *Bounding Boxes* de la ruta original se ajustan hacia arriba, lo que requiere escrituras puntuales en cada nivel afectado.
 
 ---
 
