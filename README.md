@@ -274,7 +274,10 @@ docker compose exec backend sh
 
 Eso es todo: con estos comandos la aplicación quedará accesible y los datos persistirán en las rutas montadas por volumen.
 
-## 9. Referencias
+## 9. Presentación
+En el siguiente enlace se adjunta la presentación en vivo del proyecto: https://drive.google.com/file/d/1ySMAgzBts_2pduKfxp41bEeK9-1W9aq1/view?usp=sharing
+
+## 10. Referencias
 
 *   Ramakrishnan, R., & Gehrke, J. (2002). *Database Management Systems* (3rd ed.). McGraw-Hill.
 *   Silberschatz, A., Korth, H. F., & Sudarshan, S. (2019). *Database System Concepts* (7th ed.). McGraw-Hill.
