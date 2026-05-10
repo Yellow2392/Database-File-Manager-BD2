@@ -214,7 +214,7 @@ La sintaxis del lenguaje soportado se rige por la siguiente gramática libre de 
 | | 100,000 | 179 | 1,479.87 |
 
 
-### 5.3. Discusión y Correspondencia Teórica
+### 6.1. Discusión y Correspondencia Teórica
 
 Al analizar los resultados empíricos frente al tamaño del dataset (N), comprobamos el cumplimiento de la complejidad teórica esperada para cada técnica:
 
