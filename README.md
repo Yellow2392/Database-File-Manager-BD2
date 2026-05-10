@@ -123,7 +123,18 @@ Las estructuras de indexación en árbol balanceadas basan su costo en la profun
 
 ---
 
-## 4. Descripción del Parser SQL
+## 4. Control de Concurrencia (Isolation Manager)
+
+Para garantizar la propiedad de **Aislamiento (Isolation)** dentro del estándar ACID, el sistema incorpora un **Gestor de Transacciones** robusto que permite el procesamiento de múltiples hilos simultáneos sin comprometer la integridad de los datos.
+
+- **Mecanismo de Bloqueo:** Se implementó una estrategia de **Bloqueo a nivel de registro (Record-level Locking)**. En lugar de bloquear archivos o tablas completas, el `TransactionManager` gestiona un diccionario dinámico de bloqueos (`record_locks`) donde cada registro (identificado por su clave primaria) posee su propio semáforo de exclusión mutua (`threading.Lock`).
+- **Prevención de Deadlocks (Espera-Cautelosa):** Con el fin de evitar interbloqueos infinitos, el motor utiliza una técnica de **Espera-Cautelosa (Wait-Cautious)**. Durante la solicitud de un recurso (`_get_lock`), el sistema verifica si el dueño actual del bloqueo está a su vez esperando por otro recurso; de ser así, la transacción entrante se aborta preventivamente ejecutando un **Rollback** para liberar sus propios recursos y evitar el ciclo de deadlock.
+- **Simulación mediante Hilos:** La concurrencia se logra ejecutando transacciones simultáneas a través de hilos independientes (`threading.Thread`). Esto permite que el sistema evalúe en tiempo real la competencia por los recursos del disco y la efectividad del gestor ante cargas de trabajo asíncronas.
+- **Protocolo de Dos Fases (2PL):** El gestor sigue un flujo estrictamente controlado donde primero identifica mediante el AST todas las claves necesarias, adquiere los bloqueos (fase de crecimiento) y solo libera los registros en el bloque final de la transacción (fase de decrecimiento), asegurando que las operaciones sean atómicas y aisladas del resto de procesos concurrentes.
+
+---
+
+## 5. Descripción del Parser SQL
 Para poder interactuar con las estructuras desde sentencias SQL, se desarrolló un Parser y Lexer propio adaptado a las necesidades específicas del motor, particularmente para soportar consultas espaciales nativas:
 
 - **Lexer (Análisis Léxico):** Construido mediante el módulo de expresiones regulares de Python. Actúa como un *autómata finito determinista* (AFD) que escanea la cadena de entrada de izquierda a derecha, tokenizando las palabras clave reservadas (`SELECT`, `CREATE`, `POINT`, `RADIUS`, etc.), identificadores, literales (números y cadenas) y símbolos. Ignora los espacios en blanco y rastrea la posición (línea y columna) para un reporte preciso de errores sintácticos.
@@ -233,7 +244,17 @@ Graficas
 
 
 
-### 5.3. Discusión y Correspondencia Teórica
+Graficas
+----
+![Inserción](./images/grafico_insercion_tiempos.png "Inserción")
+![Inserción](./images/grafico_busqueda_tiempos.png "Inserción")
+![Inserción](./images/grafico_rango_tiempos.png "Inserción")
+![Inserción](./images/grafico_rtree_tiempos.png "Inserción")
+
+
+
+
+### 6.1. Discusión y Correspondencia Teórica
 
 Al analizar los resultados empíricos frente al tamaño del dataset (N), comprobamos el cumplimiento de la complejidad teórica esperada para cada técnica:
 
@@ -249,7 +270,7 @@ Como dicta la teoría, la búsqueda binaria del archivo secuencial $O(\log_2 b)$
 El R-Tree arrojó un contraste interesante. La búsqueda de vecinos más cercanos (KNN) escaló de maravilla, pasando de 84 accesos a solo 179 accesos al multiplicar los datos por 100. Sin embargo, la búsqueda por Radio sufrió una explosión combinatoria en 100K (llegando a 468,296 lecturas y 120 segundos). Esto evidencia que con un radio estático muy grande en un área densamente poblada (taxis en NY), el R-Tree se ve forzado a recuperar casi todas las hojas, comportándose como un *Full Scan*.
 ---
 
-## 6. Interfaz Gráfica (GUI)
+## 7. Interfaz Gráfica (GUI)
 *(Colocar capturas de pantalla de la aplicación ejecutándose)*
 - **Captura 1:** Pantalla principal y carga (CREATE).
 ![Create Table](./images/create-image.png "Create Table")
@@ -260,7 +281,7 @@ El R-Tree arrojó un contraste interesante. La búsqueda de vecinos más cercano
 
 ---
 
-## 7. Despliegue y Ejecución
+## 8. Despliegue y Ejecución
 Se ha dockerizado la aplicación para despliegue local.
 
 Requisitos:
@@ -293,7 +314,11 @@ docker compose exec backend sh
 
 Eso es todo: con estos comandos la aplicación quedará accesible y los datos persistirán en las rutas montadas por volumen.
 
-## 8. Referencias
+## 9. Presentación
+En el siguiente enlace se adjunta la presentación en vivo del proyecto: https://drive.google.com/file/d/1ySMAgzBts_2pduKfxp41bEeK9-1W9aq1/view?usp=sharing
 
-- [text](https://ia800709.us.archive.org/13/items/nasa_techdoc_19970016975/19970016975.pdf)
-- 
+## 10. Referencias
+
+*   Ramakrishnan, R., & Gehrke, J. (2002). *Database Management Systems* (3rd ed.). McGraw-Hill.
+*   Silberschatz, A., Korth, H. F., & Sudarshan, S. (2019). *Database System Concepts* (7th ed.). McGraw-Hill.
+*   Leutenegger, S. T., Lopez, M. A., & Edgington, J. (1997). STR: A simple and efficient algorithm for R-tree packing. *Proceedings of the 13th International Conference on Data Engineering*, 497-506. https://ia800709.us.archive.org/13/items/nasa_techdoc_19970016975/19970016975.pdf
