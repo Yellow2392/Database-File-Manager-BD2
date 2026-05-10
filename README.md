@@ -104,7 +104,22 @@ En base a la teoría y tamaño de página constante establecido (ej. 4 KB):
 | **Inserción** | $O(1)$ (en Aux log) | $O(\log_m n)$ o Split |
 
 *Donde:* $n$ es la cantidad de registros poblados, $b$ es la cantidad de bloques en disco, $m$ constante de partición del árbol.  
-*(Explicar brevemente el por qué de estas complejidades).*
+
+### Explicación Teórica de las Complejidades de Acceso a Disco
+
+A continuación, se detalla la justificación teórica de las complejidades presentadas en la tabla, asumiendo un modelo de costos basado en la cantidad de páginas físicas transferidas entre el disco duro y la memoria RAM.
+
+#### 1. Archivo Secuencial (Sequential File)
+La arquitectura de esta técnica se divide en un archivo principal ordenado y un archivo auxiliar desordenado para desbordamientos temporales.
+* **Búsqueda Puntual — O(log_2 b) main + aux:** Dado que el archivo principal (main) mantiene un orden físico secuencial, el motor de base de datos puede aplicar una búsqueda binaria a nivel de bloques. Esto garantiza encontrar la página deseada en log_2 b lecturas. Si el registro se insertó recientemente y no está en el archivo principal, se suma el costo de escanear el archivo auxiliar.
+* **Búsqueda por Rango — O(log_2 b + k/r):** Inicia con una búsqueda binaria O(log_2 b) para localizar el primer bloque donde comienza la condición del rango. A partir de ese punto, aprovecha el orden físico del disco para leer secuencialmente. El término k/r es el costo de recuperación secuencial, donde 'k' representa la cantidad de registros que cumplen la condición y 'r' es el *blocking factor* (cuántos registros caben en una página).
+* **Inserción — O(1) (en Aux log):** Para evitar el costo prohibitivo de desplazar bytes en el archivo principal ordenado, las nuevas inserciones operan como un simple *append* (agregar al final) en el archivo auxiliar. Esto requiere un único acceso de escritura, garantizando tiempo constante.
+
+#### 2. R-Tree (Estructura Jerárquica Multidimensional)
+Las estructuras de indexación en árbol balanceadas basan su costo en la profundidad de navegación (altura del árbol).
+* **Búsqueda Puntual — O(log_m n):** La complejidad está directamente definida por la altura del árbol. El motor debe descender desde el nodo raíz hasta llegar al nodo hoja correcto (o Minimum Bounding Box aplicable). Cada salto de nivel implica leer una página de disco. La base del logaritmo 'm' (*fanout*) reduce drásticamente la altura del árbol, manteniendo los accesos muy bajos incluso con millones de datos (n).
+* **Búsqueda por Rango / Espacial — O(log_m n + C):** Requiere el mismo descenso inicial O(log_m n) para encontrar el límite inicial del rango o el área de interés. El término 'C' representa las lecturas extra necesarias para recorrer las hojas adyacentes o las cajas espaciales solapadas que contienen el resto de los resultados de la consulta.
+* **Inserción — O(log_m n) o Split:** El sistema invierte log_m n lecturas para descender hasta la página hoja que debe contener el nuevo registro y realiza la escritura. Si esa página ya alcanzó su límite de capacidad máxima, se desencadena un *Split* (división del nodo). Este fenómeno requiere escribir una nueva página en el disco duro y propagar la actualización de punteros hacia arriba, lo que suma accesos físicos adicionales en ese instante específico.
 
 ---
 
@@ -154,6 +169,11 @@ La sintaxis del lenguaje soportado se rige por la siguiente gramática libre de 
 
 ## 5. Resultados Experimentales y Discusión
 
+
+
+Tablas:
+---
+
 **Tabla 1: Operación de Inserción**
 | Técnica | Tamaño (N) | Accesos a Disco (Reads + Writes) | Tiempo de Ejecución (ms) |
 | :--- | :---: | :---: | :---: |
@@ -201,6 +221,16 @@ La sintaxis del lenguaje soportado se rige por la siguiente gramática libre de 
 | **K-Nearest Neighbors (KNN)**| 1,000 | 84 | 274.20 |
 | | 10,000 | 129 | 425.97 |
 | | 100,000 | 179 | 1,479.87 |
+
+
+Graficas
+----
+![Inserción](./images/grafico_insercion_tiempos.png "Inserción")
+![Inserción](./images/grafico_busqueda_tiempos.png "Inserción")
+![Inserción](./images/grafico_rango_tiempos.png "Inserción")
+![Inserción](./images/grafico_rtree_tiempos.png "Inserción")
+
+
 
 
 ### 5.3. Discusión y Correspondencia Teórica
