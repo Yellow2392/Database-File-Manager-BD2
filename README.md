@@ -265,5 +265,6 @@ Eso es todo: con estos comandos la aplicación quedará accesible y los datos pe
 
 ## 8. Referencias
 
-- [text](https://ia800709.us.archive.org/13/items/nasa_techdoc_19970016975/19970016975.pdf)
-- 
+*   Ramakrishnan, R., & Gehrke, J. (2002). *Database Management Systems* (3rd ed.). McGraw-Hill.
+*   Silberschatz, A., Korth, H. F., & Sudarshan, S. (2019). *Database System Concepts* (7th ed.). McGraw-Hill.
+*   Leutenegger, S. T., Lopez, M. A., & Edgington, J. (1997). STR: A simple and efficient algorithm for R-tree packing. *Proceedings of the 13th International Conference on Data Engineering*, 497-506. https://ia800709.us.archive.org/13/items/nasa_techdoc_19970016975/19970016975.pdf
