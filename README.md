@@ -230,7 +230,7 @@ Como dicta la teoría, la búsqueda binaria del archivo secuencial $O(\log_2 b)$
 El R-Tree arrojó un contraste interesante. La búsqueda de vecinos más cercanos (KNN) escaló de maravilla, pasando de 84 accesos a solo 179 accesos al multiplicar los datos por 100. Sin embargo, la búsqueda por Radio sufrió una explosión combinatoria en 100K (llegando a 468,296 lecturas y 120 segundos). Esto evidencia que con un radio estático muy grande en un área densamente poblada (taxis en NY), el R-Tree se ve forzado a recuperar casi todas las hojas, comportándose como un *Full Scan*.
 ---
 
-## 5. Interfaz Gráfica (GUI)
+## 7. Interfaz Gráfica (GUI)
 *(Colocar capturas de pantalla de la aplicación ejecutándose)*
 - **Captura 1:** Pantalla principal y carga (CREATE).
 ![Create Table](./images/create-image.png "Create Table")
