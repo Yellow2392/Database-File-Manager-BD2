@@ -237,20 +237,9 @@ Tablas:
 Graficas
 ----
 ![Inserción](./images/grafico_insercion_tiempos.png "Inserción")
-![Inserción](./images/grafico_busqueda_tiempos.png "Inserción")
-![Inserción](./images/grafico_rango_tiempos.png "Inserción")
-![Inserción](./images/grafico_rtree_tiempos.png "Inserción")
-
-
-
-
-Graficas
-----
-![Inserción](./images/grafico_insercion_tiempos.png "Inserción")
-![Inserción](./images/grafico_busqueda_tiempos.png "Inserción")
-![Inserción](./images/grafico_rango_tiempos.png "Inserción")
-![Inserción](./images/grafico_rtree_tiempos.png "Inserción")
-
+![BPuntual](./images/grafico_busqueda_tiempos.png "Busqueda Puntual")
+![BRango](./images/grafico_rango_tiempos.png "Busqueda por Rango")
+![RTree](./images/grafico_rtree_tiempos.png "Busqueda en RTree")
 
 
 
